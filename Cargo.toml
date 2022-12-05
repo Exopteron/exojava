@@ -5,5 +5,6 @@ members = [
     "exo-jvm",
     "exo-jvm/nugc",
     "exo-jvm/nugc/nugc-derive",
+    "java-compiler",
     "exo-java-bin"
 ]

@@ -87,6 +87,7 @@ pub enum TokenTy {
     EqualsCmp,
     Comma,
     Ident,
+    StringLit,
     VarKw,
     ExternKw,
     ReturnKw,
@@ -189,6 +190,7 @@ impl TokenStream {
                         continue;
                     }
                 }
+
 
                 v if v.is_numeric() || (v == '-' && s.lookahead().unwrap().is_numeric()) => {
                     let mut number = vec![v];

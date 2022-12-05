@@ -471,6 +471,7 @@ mod tests {
             asserteq(numobjects(), 1)
             collectgarbage()
             asserteq(numobjects(), 0)
+
             return 0
         }"#.to_string()));
 
