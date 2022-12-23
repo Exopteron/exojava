@@ -3,7 +3,7 @@ use std::rc::Rc;
 pub mod number;
 use crate::lexer::{LexErrorType, LexingError};
 
-use self::number::IntegerLiteral;
+use self::number::integer::IntegerLiteral;
 
 use super::{early::{FinalTerminalElement, lines::InputCharacter}, Tokenizable, Token};
 

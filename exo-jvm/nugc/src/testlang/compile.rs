@@ -126,18 +126,18 @@ pub struct FunctionBlock {
 }
 
 
-type Ptr<'a, T> = <ThisCollector as MemoryManager<'a>>::Ptr<T>;
+type Ptr<T> = <ThisCollector as MemoryManager>::Ptr<T>;
 
 
 
-pub enum Value<'a> {
+pub enum Value {
     Number(f64),
-    Array(Ptr<'a, [Value<'a>]>),
+    Array(Ptr<[Value]>),
     Nil,
-    NativeFn(fn(&mut Compiler) -> Value<'a>)
+    NativeFn(fn(&mut Compiler) -> Value)
 }
 
-impl<'a> Debug for Value<'a> {
+impl Debug for Value {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Number(arg0) => f.debug_tuple("Number").field(arg0).finish(),
@@ -148,7 +148,7 @@ impl<'a> Debug for Value<'a> {
     }
 }
 
-impl<'a> Clone for Value<'a> {
+impl Clone for Value {
     fn clone(&self) -> Self {
         match self {
             Self::Number(arg0) => Self::Number(arg0.clone()),
@@ -158,10 +158,10 @@ impl<'a> Clone for Value<'a> {
         }
     }
 }
-impl<'a> Copy for Value<'a> {}
+impl Copy for Value {}
 
 
-impl<'a> Value<'a> {
+impl Value {
     pub fn as_number(&self) -> Option<f64> {
         match self {
             Self::Number(v) => Some(*v),
@@ -176,14 +176,14 @@ impl<'a> Value<'a> {
         }
     }
 
-    pub fn as_array(&self) -> Option<Ptr<'a, [Value<'a>]>> {
+    pub fn as_array(&self) -> Option<Ptr<[Value]>> {
         match self {
             Self::Array(v) => Some(*v),
             _ => None
         }
     }
 
-    pub fn as_native_fn(&self) -> Option<fn(&mut Compiler) -> Value<'a>> {
+    pub fn as_native_fn(&self) -> Option<fn(&mut Compiler) -> Value> {
         match self {
             Self::NativeFn(v) => Some(*v),
             _ => None
@@ -192,29 +192,29 @@ impl<'a> Value<'a> {
 }
 
 
-impl<'a> Trace<'a, ThisCollector> for [Value<'a>] {
-    fn trace(&mut self, visitor: &mut <ThisCollector as crate::collector::MemoryManager>::VisitorTy) {
+impl Trace<ThisCollector> for [Value] {
+    fn trace(&mut self, collector: &GarbageCollector<ThisCollector>, visitor: &mut <ThisCollector as crate::collector::MemoryManager>::VisitorTy) {
         for v in self.iter_mut() {
-            visitor.visit_noref(v);
+            visitor.visit_noref(collector, v);
         }
     }
 }
 
-impl<'a> Trace<'a, ThisCollector> for Value<'a> {
-    fn trace(&mut self, visitor: &mut <ThisCollector as crate::collector::MemoryManager>::VisitorTy) {
+impl Trace<ThisCollector> for Value {
+    fn trace(&mut self, collector: &GarbageCollector<ThisCollector>, visitor: &mut <ThisCollector as crate::collector::MemoryManager>::VisitorTy) {
         match self {
-            Value::Array(v) => visitor.visit(v),
+            Value::Array(v) => visitor.visit(collector, v),
             _ => ()
         }
     }
 }
 
-pub struct ExecStackEntry<'a> {
-    stack: Vec<Value<'a>>,
-    variables: Vec<Value<'a>>
+pub struct ExecStackEntry {
+    stack: Vec<Value>,
+    variables: Vec<Value>
 }
 
-impl<'a> ExecStackEntry<'a> {
+impl ExecStackEntry {
     pub fn new(var_max: usize) -> Self {
         Self {
             stack: vec![],
@@ -222,32 +222,32 @@ impl<'a> ExecStackEntry<'a> {
         }
     }
 
-    pub fn pop_value(&mut self) -> Value<'a> {
+    pub fn pop_value(&mut self) -> Value {
         self.stack.pop().unwrap()
     }
 
-    pub fn push_value(&mut self, v: Value<'a>) {
+    pub fn push_value(&mut self, v: Value) {
         self.stack.push(v);
     }
 }
 
 
-impl<'a> Trace<'a, ThisCollector> for ExecStackEntry<'a> {
-    fn trace(&mut self, visitor: &mut <ThisCollector as MemoryManager>::VisitorTy) {
+impl Trace<ThisCollector> for ExecStackEntry {
+    fn trace(&mut self, collector: &GarbageCollector<ThisCollector>, visitor: &mut <ThisCollector as MemoryManager>::VisitorTy) {
         for entry in &mut self.stack {
-            visitor.visit_noref(entry);
+            visitor.visit_noref(collector, entry);
         }
         for entry in &mut self.variables {
-            visitor.visit_noref(entry);
+            visitor.visit_noref(collector, entry);
         }
     }
 }
 
-pub struct ExecStack<'a> {
-    pub stack: Vec<ExecStackEntry<'a>>
+pub struct ExecStack {
+    pub stack: Vec<ExecStackEntry>
 }
 
-impl<'a> ExecStack<'a> {
+impl ExecStack {
     pub fn new() -> Self {
         Self {
             stack: vec![]
@@ -262,56 +262,56 @@ impl<'a> ExecStack<'a> {
         self.stack.pop();
     }
 
-    pub fn pop_value(&mut self) -> Value<'a> {
+    pub fn pop_value(&mut self) -> Value {
         self.stack.last_mut().unwrap().pop_value()
     }
 
-    pub fn push_value(&mut self, v: Value<'a>) {
+    pub fn push_value(&mut self, v: Value) {
         self.stack.last_mut().unwrap().push_value(v);
     }
 
-    pub fn load_var(&mut self, v: usize) -> Value<'a> {
+    pub fn load_var(&mut self, v: usize) -> Value {
         self.stack.last_mut().unwrap().variables.get(v).copied().unwrap()
     }
 
-    pub fn store_var(&mut self, idx: usize, v: Value<'a>) {
+    pub fn store_var(&mut self, idx: usize, v: Value) {
         self.stack.last_mut().unwrap().variables[idx] = v;
     }
 }
 
 
-impl<'a> Trace<'a, ThisCollector> for ExecStack<'a> {
-    fn trace(&mut self, visitor: &mut <ThisCollector as MemoryManager>::VisitorTy) {
+impl Trace<ThisCollector> for ExecStack {
+    fn trace(&mut self, collector: &GarbageCollector<ThisCollector>, visitor: &mut <ThisCollector as MemoryManager>::VisitorTy) {
         for entry in &mut self.stack {
-            visitor.visit_noref(entry);
+            visitor.visit_noref(collector, entry);
         }
     }
 }
 
 
-pub struct Compiler<'a> {
+pub struct Compiler {
     pub fns: Vec<FunctionBlock>,
     pub current_fn: usize,
-    pub globals: Vec<Value<'a>>,
-    pub exec_stack: ExecStack<'a>,
-    pub gc: &'a GarbageCollector<'a, ThisCollector>
+    pub globals: Vec<Value>,
+    pub exec_stack: ExecStack,
+    pub gc: GarbageCollector<ThisCollector>
 }
 
-impl<'a> Trace<'a, ThisCollector> for Compiler<'a> {
-    fn trace(&mut self, visitor: &mut <ThisCollector as MemoryManager>::VisitorTy) {
+impl Trace<ThisCollector> for Compiler {
+    fn trace(&mut self, collector: &GarbageCollector<ThisCollector>, visitor: &mut <ThisCollector as MemoryManager>::VisitorTy) {
         for global in &mut self.globals {
-            visitor.visit_noref(global);
+            visitor.visit_noref(collector, global);
         }
-        visitor.visit_noref(&mut self.exec_stack);
+        visitor.visit_noref(collector, &mut self.exec_stack);
     }
 }
 
-impl<'a> Compiler<'a> {
+impl Compiler {
     pub fn get_current_fn(&mut self) -> &mut FunctionBlock {
         &mut self.fns[self.current_fn]
     }
 
-    pub fn exec_fn(&mut self, idx: usize) -> Value<'a> {
+    pub fn exec_fn(&mut self, idx: usize) -> Value {
         let f = &mut self.fns[idx];
         self.exec_stack.new_frame(f.var_alloc.alloc.number);
         let insts = f.insts.clone();
@@ -383,7 +383,7 @@ impl<'a> Compiler<'a> {
                         args.push(self.exec_stack.pop_value());
                     }
                     args.reverse();
-                    let array = ThisCollector::allocate_array(self.gc, &args).unwrap();
+                    let array = ThisCollector::allocate_array(&self.gc, &args).unwrap();
                     self.exec_stack.push_value(Value::Array(array));
                 },
                 Inst::Push(n) => self.exec_stack.push_value(Value::Number(*n)),
@@ -396,21 +396,21 @@ impl<'a> Compiler<'a> {
                 Inst::GetIndex => {
                     let index = self.exec_stack.pop_value().as_number().unwrap() as usize;
                     let array = self.exec_stack.pop_value().as_array().unwrap();
-                    if index > array.get().len() {
+                    if index > array.get(&self.gc).len() {
                         self.exec_stack.push_value(Value::Nil);
                     } else {
-                        self.exec_stack.push_value(array.get()[index]);
+                        self.exec_stack.push_value(array.get(&self.gc)[index]);
                     }
                 },
                 Inst::SetIndex => {
                     let value = self.exec_stack.pop_value();
                     let index = self.exec_stack.pop_value().as_number().unwrap() as usize;
                     let array = self.exec_stack.pop_value().as_array().unwrap();
-                    if index > array.get().len() {
+                    if index > array.get(&self.gc).len() {
                         panic!("index out of bounds");
                     } else {
-                        let prev = array.get()[index];
-                        array.get_mut()[index] = value;
+                        let prev = array.get(&self.gc)[index];
+                        array.get_mut(&self.gc)[index] = value;
                         self.exec_stack.push_value(prev);
                     }
                 },
@@ -445,7 +445,7 @@ mod tests {
             fns: vec![FunctionBlock { insts: vec![], var_alloc: super::VarScoper::new() }],
             current_fn: 0,
             globals: vec![],
-            gc: &gc,
+            gc: gc,
             exec_stack: ExecStack {
                 stack: vec![]
             },
@@ -496,10 +496,10 @@ mod tests {
 
             let start = c.gc.0.borrow().num_objects();
 
-            ThisCollector::visit_with(c.gc, |v| {
-                v.visit_noref(c);
+            ThisCollector::visit_with(&c.gc.clone(), |v| {
+                v.visit_noref(&c.gc.clone(), c);
             });
-            ThisCollector::collect(c.gc);
+            ThisCollector::collect(&c.gc);
 
             let end = c.gc.0.borrow().num_objects();
             return Value::Number((start - end) as f64);
@@ -509,15 +509,16 @@ mod tests {
 
             let num_args = c.exec_stack.pop_value().as_number().unwrap() as usize;
 
+            let collector = c.gc.clone();
             for _ in 0..num_args {
                 let v = c.exec_stack.pop_value();
-                fn visit_v(v: Value) {
+                fn visit_v(gc: GarbageCollector<ThisCollector>, v: Value) {
                     match v {
                         Value::Number(v) => print!("{}", v),
                         Value::Array(v) => {
                             print!("[");
-                            for v in v.get().iter() {
-                                (visit_v)(*v);
+                            for v in v.get(&gc).iter() {
+                                (visit_v)(gc.clone(), *v);
                                 print!(", ");
                             }
                             print!("]")
@@ -527,7 +528,7 @@ mod tests {
                     }
                     print!("")
                 }
-                visit_v(v);
+                visit_v(collector.clone(), v);
             }
             println!();
 

@@ -1,3 +1,5 @@
+use std::ops::Deref;
+
 use self::{early::{lines::{InputCharacter, LineTerminator}, BaseToken, CharStream, FinalTerminalElement}, stream::JavaTerminalStream, whitespace::Whitespace, comment::Comment, separators::Separator, operators::Operator, keywords::Keyword, identifier::Identifier, literal::Literal};
 
 use super::{LexErrorType, LexResult, LexingError};
@@ -27,12 +29,19 @@ impl<T: Tokenizable> Token<T> {
         }
     }
 }
+impl<T: Tokenizable> Deref for Token<T> {
+    type Target = T;
+
+    fn deref(&self) -> &Self::Target {
+        &self.v
+    }
+}
 
 
 
 #[derive(Clone, Debug)]
 pub struct Input {
-    pub elements: Vec<Token<InputElement>>
+    pub elements: Vec<Token<JToken>>
 }
 
 impl Tokenizable for Input {
@@ -43,10 +52,9 @@ impl Tokenizable for Input {
                 break;
             }
             let element = s.get::<InputElement>()?;
-            if matches!(element.v, InputElement::Whitespace()) {
-                continue;
+            if let InputElement::Token(v) = element.v {
+                elements.push(v);
             }
-            elements.push(element);
         }
         Ok(Self {
             elements

@@ -1,4 +1,4 @@
-use std::{cell::RefCell, marker::PhantomData};
+use std::{cell::RefCell, marker::PhantomData, rc::Rc};
 
 use thiserror::Error;
 
@@ -8,65 +8,72 @@ pub enum AllocationError {
     NoMemory,
 }
 
-pub trait MemoryManager<'c>: Sized + 'c {
+pub trait MemoryManager: Sized {
     type Ptr<T: ?Sized>: Copy;
 
-    type VisitorTy: Visitor<'c, Self>;
+    type VisitorTy: Visitor<Self>;
 
     fn allocate<T>(
-        collector: &'c GarbageCollector<'c, Self>,
+        collector: &GarbageCollector<Self>,
         v: T,
     ) -> std::result::Result<Self::Ptr<T>, AllocationError>;
 
     fn allocate_array<T>(
-        collector: &'c GarbageCollector<'c, Self>,
+        collector: &GarbageCollector<Self>,
         v: &[T],
     ) -> std::result::Result<Self::Ptr<[T]>, AllocationError>;
 
 
     fn visit_with<'b, F: FnOnce(&mut Self::VisitorTy)>(
-        collector: &'b GarbageCollector<'c, Self>,
+        collector: &GarbageCollector<Self>,
         f: F,
     );
 
-    fn collect(collector: &'c GarbageCollector<'c, Self>);
+    fn collection_index(collector: &GarbageCollector<Self>) -> usize;
+
+    fn collect(collector: &GarbageCollector<Self>);
 }
 
-pub trait Visitor<'a, Gc: MemoryManager<'a>> {
-    fn visit<T: ?Sized + Trace<'a, Gc>>(&mut self, object: &mut Gc::Ptr<T>);
-    fn mark<T: ?Sized>(&mut self, object: &mut Gc::Ptr<T>) -> bool;
+pub trait Visitor<Gc: MemoryManager> {
+    fn visit<T: ?Sized + Trace<Gc>>(&mut self, collector: &GarbageCollector<Gc>, object: &mut Gc::Ptr<T>);
+    fn mark<T: ?Sized>(&mut self, collector: &GarbageCollector<Gc>, object: &mut Gc::Ptr<T>) -> bool;
 
-    fn visit_noref<T: ?Sized + Trace<'a, Gc>>(&mut self, object: &mut T);
+    fn visit_noref<T: ?Sized + Trace<Gc>>(&mut self, collector: &GarbageCollector<Gc>, object: &mut T);
 }
 
-pub trait Trace<'col, Gc: MemoryManager<'col>> {
-    fn trace(&mut self, visitor: &mut Gc::VisitorTy);
+pub trait Trace<Gc: MemoryManager> {
+    fn trace(&mut self, gc: &GarbageCollector<Gc>, visitor: &mut Gc::VisitorTy);
 }
 
 
 
-pub trait Finalize<'col, Gc: MemoryManager<'col>> {
+pub trait Finalize<'col, Gc: MemoryManager> {
     fn finalize(self);
 }
 
-struct Epic<'col, Gc: MemoryManager<'col>> {
+struct Epic<Gc: MemoryManager> {
     ptr: Gc::Ptr<i32>,
 }
 
-impl<'col2, Gc: MemoryManager<'col2>> Trace<'col2, Gc> for Epic<'col2, Gc> {
-    fn trace(&mut self, visitor: &mut Gc::VisitorTy) {
-        visitor.mark(&mut self.ptr);
+impl<Gc: MemoryManager> Trace<Gc> for Epic<Gc> {
+    fn trace(&mut self, gc: &GarbageCollector<Gc>, visitor: &mut Gc::VisitorTy) {
+        visitor.mark(gc, &mut self.ptr);
     }
 }
 
-pub struct GarbageCollector<'v, M: MemoryManager<'v>>(pub RefCell<M>, PhantomData<&'v M>);
+pub struct GarbageCollector<M: MemoryManager>(pub Rc<RefCell<M>>);
 
-impl<'v, M: MemoryManager<'v>> GarbageCollector<'v, M> {
+impl<M: MemoryManager> GarbageCollector<M> {
     pub fn new(collector: M) -> Self {
-        Self(RefCell::new(collector), PhantomData)
+        Self(Rc::new(RefCell::new(collector)))
     }
 
-    fn allocate<T>(&'v self, v: T) -> std::result::Result<M::Ptr<T>, AllocationError> {
+    fn allocate<T>(&self, v: T) -> std::result::Result<M::Ptr<T>, AllocationError> {
         M::allocate(self, v)
+    }
+}
+impl<M: MemoryManager> Clone for GarbageCollector<M> {
+    fn clone(&self) -> Self {
+        Self(self.0.clone())
     }
 }

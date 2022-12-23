@@ -47,23 +47,10 @@ mod tests {
     #[test]
     fn testepic() {
         let mut chars = JavaTerminalStream::new(CharStream::new(r#"
-        package among.us.spaceship;
-
-        import java.lang.UnsupportedOperationException;
-
-
-        public class Imposter extends Crewmate {
-
-            public boolean SUSSY = true;
-
-            @Override
-            public void doTasks() {
-                throw new UnsupportedOperationException("I am an imposter!");
-            }
-
-        }
+        0b0011
         
         "#.to_string()).unwrap()).unwrap();
+        let x = 0x0f32;
         let i = Input::parse(&mut chars).unwrap();
         println!("{:#?}", i);
         // while !chars.is_finished() {

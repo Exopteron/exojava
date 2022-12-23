@@ -180,6 +180,6 @@ mod tests {
         ), None)
         .unwrap();
         class_file.constant_pool.verify_structure(&class_file).unwrap();
-        panic!("File: {:#?}", class_file);
+        // panic!("File: {:#?}", class_file);
     }
 }

@@ -84,6 +84,15 @@ impl JavaTerminalStream {
         }
     }
 
+    pub fn match_one_of(&mut self, strs: &[&str], eat: bool) -> LexResult<usize> {
+        for (idx, s) in strs.iter().enumerate() {
+            if self.match_str(s, eat).is_ok() {
+                return Ok(idx);
+            }
+        }
+        return Err(LexingError::new(LexErrorType::SyntaxError(format!("Could not match one of {:?}", strs)), (self.position, self.position)))
+    }
+
     pub fn match_str(&mut self, str: &str, eat: bool) -> LexResult<()> {
         let mut cursor = 0;
         for c in str.chars() {

@@ -1,6 +1,5 @@
 use std::{
     alloc::Layout,
-    borrow::BorrowMut,
     cell::Cell,
     marker::PhantomData,
     num::NonZeroUsize,
@@ -18,6 +17,7 @@ mod linked_list;
 pub struct ThisCollector {
     allocator: LinkedListAllocator,
     objects: Vec<Pin<Box<GcRoot>>>,
+    collection_index: usize,
 }
 
 impl ThisCollector {
@@ -25,6 +25,7 @@ impl ThisCollector {
         Self {
             allocator: LinkedListAllocator::new(size),
             objects: Vec::new(),
+            collection_index: 0
         }
     }
 
@@ -70,13 +71,13 @@ impl GcRoot {
 }
 
 pub struct GcRef<'a, T: ?Sized> {
-    ptr: GcPtr<'a, T>,
+    ptr: GcPtr<T>,
     r: &'a T,
 }
 
 impl<'a, T: ?Sized> Drop for GcRef<'a, T> {
     fn drop(&mut self) {
-        self.ptr.get_root_mut().borrow_flag.update(|v| v + 1);
+        unsafe { self.ptr.get_root_mut() }.borrow_flag.update(|v| v + 1);
     }
 }
 
@@ -89,13 +90,13 @@ impl<'a, T: ?Sized> Deref for GcRef<'a, T> {
 }
 
 pub struct GcMut<'a, T: ?Sized> {
-    ptr: GcPtr<'a, T>,
+    ptr: GcPtr<T>,
     r: &'a mut T,
 }
 
 impl<'a, T: ?Sized> Drop for GcMut<'a, T> {
     fn drop(&mut self) {
-        self.ptr.get_root_mut().borrow_flag.update(|v| v - 1);
+        unsafe {self.ptr.get_root_mut()}.borrow_flag.update(|v| v - 1);
     }
 }
 
@@ -115,29 +116,32 @@ impl<'a, T: ?Sized> DerefMut for GcMut<'a, T> {
 
 pub struct PtrVisitor;
 
-impl<'a> Visitor<'a, ThisCollector> for PtrVisitor {
-    fn visit<T: ?Sized + Trace<'a, ThisCollector>>(
+impl<'a> Visitor<ThisCollector> for PtrVisitor {
+    fn visit<T: ?Sized + Trace<ThisCollector>>(
         &mut self,
+        collector: &GarbageCollector<ThisCollector>,
         object: &mut <ThisCollector as MemoryManager>::Ptr<T>,
     ) {
-        if self.mark(object) {
-            let mut value = object.get_mut();
-            value.trace(self);
+        if self.mark(collector, object) {
+            let mut value = object.get_mut(collector);
+            value.trace(collector, self);
         }
     }
 
-    fn visit_noref<T: ?Sized + Trace<'a, ThisCollector>>(
+    fn visit_noref<T: ?Sized + Trace<ThisCollector>>(
         &mut self,
+        collector: &GarbageCollector<ThisCollector>,
         object: &mut T,
     ) {
-        object.trace(self);
+        object.trace(collector, self);
     }
 
 
-    fn mark<T: ?Sized>(&mut self, object: &mut <ThisCollector as MemoryManager>::Ptr<T>) -> bool {
-        let ptr = object.get_root_mut();
+    fn mark<T: ?Sized>(&mut self, _collector: &GarbageCollector<ThisCollector>, object: &mut <ThisCollector as MemoryManager>::Ptr<T>) -> bool {
+        let ptr = unsafe { object.get_root_mut() };
         if ptr.mark == Mark::White {
             ptr.mark = Mark::Black;
+            object.collection_index += 1;
             return true; // was not marked reachable
         }
         false // was reachable
@@ -146,35 +150,38 @@ impl<'a> Visitor<'a, ThisCollector> for PtrVisitor {
 
 /// Garbage-collected reference to object.
 
-pub struct GcPtr<'a, T: ?Sized> {
+pub struct GcPtr<T: ?Sized> {
     ptr: NonNull<GcRoot>,
-    ref_to_self: &'a GarbageCollector<'a, ThisCollector>,
+    collection_index: usize,
     _m: PhantomData<T>,
 }
 
-impl<'a, T: ?Sized> GcPtr<'a, T> {
-    fn new(ptr: NonNull<GcRoot>, ref_to_self: &'a GarbageCollector<'a, ThisCollector>) -> Self {
+impl<T: ?Sized> GcPtr<T> {
+    fn new(ptr: NonNull<GcRoot>, collection_index: usize) -> Self {
         Self {
             ptr,
-            ref_to_self,
+            collection_index,
             _m: PhantomData,
         }
     }
 
-    fn get_root(&self) -> &GcRoot {
-        unsafe { self.ptr.as_ref() }
+    unsafe fn get_root(&self) -> &GcRoot {
+        self.ptr.as_ref()
     }
 
-    fn get_root_mut(&mut self) -> &mut GcRoot {
-        unsafe { self.ptr.as_mut() }
+    unsafe fn get_root_mut(&mut self) -> &mut GcRoot {
+        self.ptr.as_mut()
     }
 
-    pub fn ptr_eq(&self, other: GcPtr<'a, T>) -> bool {
+    pub fn ptr_eq(&self, other: GcPtr<T>) -> bool {
         std::ptr::eq(self.ptr.as_ptr(), other.ptr.as_ptr())
     }
 
-    pub fn get(&self) -> GcRef<'_, T> {
-        let root = self.get_root();
+    pub fn get<M: MemoryManager>(&self, collector: &GarbageCollector<M>) -> GcRef<'_, T> {
+        if self.collection_index != M::collection_index(collector) {
+            panic!("mismatched collection index: {} {}", self.collection_index, M::collection_index(collector));
+        }
+        let root = unsafe { self.get_root() };
         if is_writing(root.borrow_flag.get()) {
             panic!("mutably borrowed");
         }
@@ -190,8 +197,11 @@ impl<'a, T: ?Sized> GcPtr<'a, T> {
         }
     }
 
-    pub fn get_mut(&self) -> GcMut<'_, T> {
-        let root = self.get_root();
+    pub fn get_mut<M: MemoryManager>(&self, collector: &GarbageCollector<M>) -> GcMut<'_, T> {
+        if self.collection_index < M::collection_index(collector) {
+            panic!("mismatched collection index: {} {}", self.collection_index, M::collection_index(collector));
+        }
+        let root = unsafe { self.get_root() };
         if is_reading(root.borrow_flag.get()) {
             panic!("immutably borrowed");
         }
@@ -209,24 +219,24 @@ impl<'a, T: ?Sized> GcPtr<'a, T> {
     }
 }
 
-impl<'a, T: ?Sized> Clone for GcPtr<'a, T> {
+impl<'a, T: ?Sized> Clone for GcPtr<T> {
     fn clone(&self) -> Self {
         Self {
             ptr: self.ptr,
-            ref_to_self: self.ref_to_self,
+            collection_index: self.collection_index,
             _m: self._m,
         }
     }
 }
-impl<'a, T: ?Sized> Copy for GcPtr<'a, T> {}
+impl<'a, T: ?Sized> Copy for GcPtr<T> {}
 
-impl<'c> MemoryManager<'c> for ThisCollector {
-    type Ptr<T: ?Sized> = GcPtr<'c, T>;
+impl MemoryManager for ThisCollector {
+    type Ptr<T: ?Sized> = GcPtr<T>;
 
     type VisitorTy = PtrVisitor;
 
     fn allocate<T>(
-        collector: &'c crate::collector::GarbageCollector<'c, Self>,
+        collector: &crate::collector::GarbageCollector<Self>,
         v: T,
     ) -> std::result::Result<Self::Ptr<T>, AllocationError> {
         let layout = Layout::new::<T>();
@@ -237,20 +247,21 @@ impl<'c> MemoryManager<'c> for ThisCollector {
         let mut pinned = Box::pin(root);
         let pinned_ptr = NonNull::new(&mut *pinned).unwrap();
         collector.0.borrow_mut().objects.push(pinned);
-        Ok(GcPtr::new(pinned_ptr, collector))
+        Ok(GcPtr::new(pinned_ptr, collector.0.borrow_mut().collection_index))
     }
 
     fn visit_with<'b, F: FnOnce(&mut Self::VisitorTy)>(
-        _collector: &'b crate::collector::GarbageCollector<'c, Self>,
+        _collector: &'b crate::collector::GarbageCollector<Self>,
         f: F,
     ) {
         let mut visitor = PtrVisitor;
         f(&mut visitor);
     }
 
-    fn collect(collector: &'c GarbageCollector<'c, Self>) {
-        let mut collector = collector.0.borrow_mut();
+    fn collect(collector: &GarbageCollector< Self>) {
 
+        let mut collector = collector.0.borrow_mut();
+        collector.collection_index += 1;
         let mut remove_list = Vec::new();
         for (idx, root) in collector.objects.iter_mut().enumerate() {
             if root.mark == Mark::White {
@@ -283,7 +294,7 @@ impl<'c> MemoryManager<'c> for ThisCollector {
     }
 
     fn allocate_array<T>(
-        collector: &'c GarbageCollector<'c, Self>,
+        collector: &GarbageCollector<Self>,
         v: &[T],
     ) -> std::result::Result<Self::Ptr<[T]>, AllocationError> {
         let layout = Layout::array::<T>(v.len()).unwrap();
@@ -294,7 +305,11 @@ impl<'c> MemoryManager<'c> for ThisCollector {
         let mut pinned = Box::pin(root);
         let pinned_ptr = NonNull::new(&mut *pinned).unwrap();
         collector.0.borrow_mut().objects.push(pinned);
-        Ok(GcPtr::new(pinned_ptr, collector))
+        Ok(GcPtr::new(pinned_ptr, collector.0.borrow().collection_index))
+    }
+
+    fn collection_index(collector: &GarbageCollector<Self>) -> usize {
+        collector.0.borrow().collection_index
     }
 }
 
@@ -310,32 +325,38 @@ mod tests {
 
     use super::{GcPtr, ThisCollector};
 
-    #[test]
-    fn test_mark() {
-        let allocator = ThisCollector::new(NonZeroUsize::new(1 * 1_000_000).unwrap());
-        let gc = GarbageCollector::new(allocator);
-        let mut value = ThisCollector::allocate(&gc, 420i32).unwrap();
-
-        assert_eq!(value.get_root().mark, Mark::White);
-
-        ThisCollector::visit_with(&gc, |v| {
-            v.mark(&mut value);
-        });
-
-        assert_eq!(value.get_root().mark, Mark::Black);
-    }
 
     #[test]
     #[should_panic]
     fn test_freed() {
+
         let allocator = ThisCollector::new(NonZeroUsize::new(1 * 1_000_000).unwrap());
         let gc = GarbageCollector::new(allocator);
         let value = ThisCollector::allocate(&gc, 420i32).unwrap();
 
         ThisCollector::collect(&gc);
 
-        assert_eq!(*value.get(), 420);
+        assert_eq!(*value.get(&gc), 420);
     }
+
+    #[test]
+    fn test_mark() {
+        let allocator = ThisCollector::new(NonZeroUsize::new(1 * 1_000_000).unwrap());
+        let gc = GarbageCollector::new(allocator);
+        {
+            let mut value = ThisCollector::allocate(&gc, 420i32).unwrap();
+
+            assert_eq!(unsafe {value.get_root()}.mark, Mark::White);
+    
+            ThisCollector::visit_with(&gc, |v| {
+                v.mark(&gc.clone(), &mut value);
+            });
+    
+            assert_eq!(unsafe { value.get_root() }.mark, Mark::Black);
+        }
+        std::hint::black_box(gc);
+    }
+
 
     #[test]
     fn test_collect() {
@@ -343,28 +364,29 @@ mod tests {
         let gc = GarbageCollector::new(allocator);
         let mut value = ThisCollector::allocate(&gc, 420i32).unwrap();
         let value_two = ThisCollector::allocate(&gc, 69i32).unwrap();
+        
 
         ThisCollector::visit_with(&gc, |v| {
-            v.mark(&mut value);
+            v.mark(&gc.clone(), &mut value);
         });
 
         ThisCollector::collect(&gc);
     }
 
-    struct ThingWithAPtr<'a, C: MemoryManager<'a>> {
+    struct ThingWithAPtr<C: MemoryManager> {
         ptr: C::Ptr<i32>,
     }
 
-    impl<'a, C: MemoryManager<'a>> Trace<'a, C> for ThingWithAPtr<'a, C> {
-        fn trace(&mut self, visitor: &mut C::VisitorTy) {
+    impl<'a, C: MemoryManager> Trace<C> for ThingWithAPtr<C> {
+        fn trace(&mut self, gc: &GarbageCollector<C>, visitor: &mut C::VisitorTy) {
             println!("Was muvva fn called");
-            visitor.mark(&mut self.ptr);
+            visitor.mark(gc, &mut self.ptr);
         }
     }
 
     #[test]
     fn test_trace() {
-        type OurThingWithAPtr<'a> = ThingWithAPtr<'a, ThisCollector>;
+        type OurThingWithAPtr<'a> = ThingWithAPtr<ThisCollector>;
 
         let allocator = ThisCollector::new(NonZeroUsize::new(1 * 1_000_000).unwrap());
         let gc = GarbageCollector::new(allocator);
@@ -372,7 +394,7 @@ mod tests {
         let mut value_two = ThisCollector::allocate(&gc, OurThingWithAPtr { ptr: value }).unwrap();
 
         ThisCollector::visit_with(&gc, |v| {
-            v.visit(&mut value_two);
+            v.visit(&gc.clone(), &mut value_two);
         });
 
         ThisCollector::collect(&gc);
@@ -383,26 +405,27 @@ mod tests {
     #[test]
     #[should_panic]
     fn test_borrow() {
+        println!("A");
         let allocator = ThisCollector::new(NonZeroUsize::new(1 * 1_000_000).unwrap());
         let gc = GarbageCollector::new(allocator);
         let mut value = ThisCollector::allocate(&gc, 420i32).unwrap();
 
-        let borrow_one = value.get_mut();
-        let borrow_two = value.get();
+        let borrow_one = value.get_mut(&gc);
+        let borrow_two = value.get(&gc);
     }
 
 
-    type Ptr<'a, T> = <ThisCollector as MemoryManager<'a>>::Ptr<T>;
+    type Ptr<T> = <ThisCollector as MemoryManager>::Ptr<T>;
 
-    struct EpicVM<'a> {
-        gc: &'a GarbageCollector<'a, ThisCollector>,
-        stack: Vec<Ptr<'a, i32>>,
+    struct EpicVM {
+        gc: GarbageCollector<ThisCollector>,
+        stack: Vec<Ptr<i32>>,
     }
 
-    impl<'a> Trace<'a, ThisCollector> for EpicVM<'a> {
-        fn trace(&mut self, visitor: &mut <ThisCollector as MemoryManager>::VisitorTy) {
+    impl Trace<ThisCollector> for EpicVM {
+        fn trace(&mut self, collector: &GarbageCollector<ThisCollector>, visitor: &mut <ThisCollector as MemoryManager>::VisitorTy) {
             for v in &mut self.stack {
-                visitor.mark(v);
+                visitor.mark(collector, v);
             }
         }
     }
@@ -414,24 +437,24 @@ mod tests {
         Sub,
     }
 
-    impl<'a> EpicVM<'a> {
-        pub fn new(gc: &'a GarbageCollector<'a, ThisCollector>) -> Self {
+    impl EpicVM {
+        pub fn new(gc: GarbageCollector<ThisCollector>) -> Self {
             Self {
                 stack: Vec::new(),
                 gc,
             }
         }
 
-        fn alloc_num(&mut self, v: i32) -> Ptr<'a, i32> {
+        fn alloc_num(&mut self, v: i32) -> Ptr<i32> {
             let start = self.gc.0.borrow().objects.len();
             if start > 10 {
                 // not enough space
-                ThisCollector::visit_with(self.gc, |visitor| {
-                    visitor.visit_noref(self);
+                ThisCollector::visit_with(&self.gc.clone(), |visitor| {
+                    visitor.visit_noref(&self.gc.clone(), self);
                 });
 
 
-                ThisCollector::collect(self.gc);
+                ThisCollector::collect(&self.gc);
                 let end = self.gc.0.borrow().objects.len();
 
                 println!("Reclaimed {} objects", start - end);
@@ -440,7 +463,7 @@ mod tests {
                 }
 
             }
-            ThisCollector::allocate(self.gc, v).unwrap()
+            ThisCollector::allocate(&self.gc, v).unwrap()
         }
 
         pub fn eval(&mut self, instructions: &[Instruction]) {
@@ -457,14 +480,14 @@ mod tests {
                         let v2 = self.stack.pop().unwrap();
                         let v1 = self.stack.pop().unwrap();
 
-                        let v = self.alloc_num(*v1.get() + *v2.get());
+                        let v = self.alloc_num(*v1.get(&self.gc) + *v2.get(&self.gc));
                         self.stack.push(v);
                     },
                     Instruction::Sub => {
                         let v2 = self.stack.pop().unwrap();
                         let v1 = self.stack.pop().unwrap();
 
-                        let v = self.alloc_num(*v1.get() - *v2.get());
+                        let v = self.alloc_num(*v1.get(&self.gc) - *v2.get(&self.gc));
                         self.stack.push(v);
                     },
                 }
@@ -476,7 +499,7 @@ mod tests {
     fn test_vm() {
         let allocator = ThisCollector::new(NonZeroUsize::new(1 * 1_000_000).unwrap());
         let gc = GarbageCollector::new(allocator);
-        let mut vm = EpicVM::new(&gc);
+        let mut vm = EpicVM::new(gc);
         vm.eval(&[
             Instruction::Push(1),
             Instruction::Pop,
@@ -514,6 +537,6 @@ mod tests {
             Instruction::Push(10),
             Instruction::Add,
         ]);
-        assert_eq!(*vm.stack.pop().unwrap().get(), 19);
+        assert_eq!(*vm.stack.pop().unwrap().get(&vm.gc), 19);
     }
 }

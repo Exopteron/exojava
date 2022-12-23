@@ -8,7 +8,7 @@ macro_rules! def_keywords {
     ) => {
 
         $(
-            #[derive(Clone, Debug)]
+            #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
             pub struct $name;
             impl Tokenizable for $name {
                 fn parse(s: &mut super::JavaTerminalStream) -> crate::lexer::LexResult<Self> {
@@ -19,7 +19,7 @@ macro_rules! def_keywords {
         )*
 
 
-        #[derive(Clone, Debug)]
+        #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
         pub enum Keyword {
             $(
                 $name($name)

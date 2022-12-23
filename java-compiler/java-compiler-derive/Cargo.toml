@@ -1,11 +1,15 @@
 [package]
-name = "java-compiler"
+name = "java-compiler-derive"
 version = "0.1.0"
 edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
+[lib]
+proc-macro = true
+
 [dependencies]
-thiserror = "1.0"
-fxhash = "0.2"
-java-compiler-derive = { path = "./java-compiler-derive" }
+syn = {version="*",features=["full","fold"]}
+quote = "*"
+anyhow = "*"
+proc-macro2 = "*"
