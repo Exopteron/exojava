@@ -88,6 +88,7 @@ pub enum FieldType {
     ArrayType(ArrayType)
 }
 
+
 impl Parseable for FieldType {
     fn parse(s: &mut exo_parser::LexerStream) -> exo_parser::error::Result<Self> {
         multi_choice! {

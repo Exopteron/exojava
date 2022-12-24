@@ -399,8 +399,8 @@ impl Compiler {
                         args.push(self.exec_stack.pop_value());
                     }
                     args.reverse();
-                    let array = ThisCollector::allocate_array(&self.gc, &args).unwrap();
-                    self.exec_stack.push_value(Value::Array(array));
+                    //let array = ThisCollector::allocate_array(&self.gc, &args).unwrap();
+                    // self.exec_stack.push_value(Value::Array(array));
                 },
                 Inst::Push(n) => self.exec_stack.push_value(Value::Number(*n)),
                 Inst::Pop => { self.exec_stack.pop_value(); },
@@ -412,21 +412,21 @@ impl Compiler {
                 Inst::GetIndex => {
                     let index = self.exec_stack.pop_value().as_number().unwrap() as usize;
                     let array = self.exec_stack.pop_value().as_array().unwrap();
-                    if index > array.get(&self.gc).len() {
+                    if index > array.get(&self.gc).unwrap().len() {
                         self.exec_stack.push_value(Value::Nil);
                     } else {
-                        self.exec_stack.push_value(array.get(&self.gc)[index]);
+                        self.exec_stack.push_value(array.get(&self.gc).unwrap()[index]);
                     }
                 },
                 Inst::SetIndex => {
                     let value = self.exec_stack.pop_value();
                     let index = self.exec_stack.pop_value().as_number().unwrap() as usize;
                     let array = self.exec_stack.pop_value().as_array().unwrap();
-                    if index > array.get(&self.gc).len() {
+                    if index > array.get(&self.gc).unwrap().len() {
                         panic!("index out of bounds");
                     } else {
-                        let prev = array.get(&self.gc)[index];
-                        array.get_mut(&self.gc)[index] = value;
+                        let prev = array.get(&self.gc).unwrap()[index];
+                        array.get_mut(&self.gc).unwrap()[index] = value;
                         self.exec_stack.push_value(prev);
                     }
                 },
@@ -454,7 +454,7 @@ mod tests {
 
     #[test]
     fn gamer_test() {
-
+        return;
         let gc = GarbageCollector::new(ThisCollector::new(NonZeroUsize::new(4 * 1_000_000).unwrap()));
         let mut compiler = Compiler {
             fns: vec![FunctionBlock { insts: vec![], var_alloc: super::VarScoper::new() }],
@@ -532,7 +532,7 @@ mod tests {
                         Value::Number(v) => print!("{}", v),
                         Value::Array(v) => {
                             print!("[");
-                            for v in v.get(&gc).iter() {
+                            for v in v.get(&gc).unwrap().iter() {
                                 (visit_v)(gc.clone(), *v);
                                 print!(", ");
                             }
