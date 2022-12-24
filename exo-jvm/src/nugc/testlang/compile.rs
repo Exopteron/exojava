@@ -430,10 +430,9 @@ impl Compiler {
 #[cfg(test)]
 mod tests {
 
-    use core::num;
     use std::num::NonZeroUsize;
 
-    use super::super::super::{testlang::{compile::Compiler, parse::{TokenStream, CharStream, Expr, NonTerminal, Stmt, Block}}, collector::{GarbageCollector, MemoryManager, Visitor}, implementation::ThisCollector};
+    use super::super::super::{testlang::{compile::Compiler, parse::{TokenStream, CharStream, NonTerminal, Block}}, collector::{GarbageCollector, MemoryManager, Visitor}, implementation::ThisCollector};
 
     use super::{FunctionBlock, VarAllocator, ExecStack, Value};
 

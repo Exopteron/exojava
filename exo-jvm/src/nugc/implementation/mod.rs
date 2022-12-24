@@ -392,7 +392,6 @@ mod tests {
 
     use super::super::{
         collector::{GarbageCollector, MemoryManager, Trace, Visitor},
-        implementation::Mark,
     };
 
     use super::{ThisCollector};
@@ -400,7 +399,7 @@ mod tests {
     #[test]
     #[should_panic]
     fn test_freed() {
-        let allocator = ThisCollector::new(NonZeroUsize::new(1 * 1_000_000).unwrap());
+        let allocator = ThisCollector::new(NonZeroUsize::new(1_000_000).unwrap());
         let gc = GarbageCollector::new(allocator);
         let value = gc.allocate(420i32).unwrap();
 
@@ -409,21 +408,46 @@ mod tests {
         assert_eq!(*value.get(&gc), 420);
     }
 
+
+    #[test]
+    #[should_panic]
+    fn test_structure_invalid_size() {
+        let mut builder = StructureBuilder::new();
+        builder.insert_field(FieldDef::new("balls".to_string(), 4, 4));
+
+
+        let strct = builder.build();
+
+        let allocator = ThisCollector::new(NonZeroUsize::new(1_000_000).unwrap());
+        let gc = GarbageCollector::new(allocator);
+
+        let structure = gc.allocate_structure(&strct).unwrap();
+        let mut s = structure.get_mut(&gc);
+        let _: &mut i16 = unsafe { s.interpret_field(&strct, "balls") }.unwrap();
+    }
+
     #[test]
     fn test_structure() {
         let mut builder = StructureBuilder::new();
-        builder.insert_field(FieldDef::new("balls".to_string(), 4, 4));
+        builder.insert_field(FieldDef::new("balls_1".to_string(), 4, 4));
+
+        builder.insert_field(FieldDef::new("balls_2".to_string(), 8, 8));
+
+
         let strct = builder.build();
 
-        let allocator = ThisCollector::new(NonZeroUsize::new(1 * 1_000_000).unwrap());
+        let allocator = ThisCollector::new(NonZeroUsize::new(1_000_000).unwrap());
         let gc = GarbageCollector::new(allocator);
 
         let mut structure = gc.allocate_structure(&strct).unwrap();
 
         {
             let mut s = structure.get_mut(&gc);
-            let v: &mut i32 = unsafe { s.interpret_field(&strct, "balls") }.unwrap();
+            let v: &mut i32 = unsafe { s.interpret_field(&strct, "balls_1") }.unwrap();
             *v = 420;
+
+            let v: &mut i64 = unsafe { s.interpret_field(&strct, "balls_2") }.unwrap();
+            *v = 69;
         }
 
         ThisCollector::visit_with(&gc, |v| {
@@ -433,30 +457,20 @@ mod tests {
 
         {
             let mut s = structure.get_mut(&gc);
-            let v: &mut i32 = unsafe { s.interpret_field(&strct, "balls") }.unwrap();
+            let v: &mut i32 = unsafe { s.interpret_field(&strct, "balls_1") }.unwrap();
             assert_eq!(*v, 420);
+
+            let v: &mut i64 = unsafe { s.interpret_field(&strct, "balls_2") }.unwrap();
+            assert_eq!(*v, 69);
         }
     }
 
-    #[test]
-    fn test_collect() {
-        let allocator = ThisCollector::new(NonZeroUsize::new(1 * 1_000_000).unwrap());
-        let gc = GarbageCollector::new(allocator);
-        let mut value = ThisCollector::allocate(&gc, 420i32).unwrap();
-        let value_two = ThisCollector::allocate(&gc, 69i32).unwrap();
-
-        ThisCollector::visit_with(&gc, |v| {
-            v.mark(&gc.clone(), &mut value);
-        });
-
-
-    }
 
     struct ThingWithAPtr<C: MemoryManager> {
         ptr: C::Ptr<i32>,
     }
 
-    impl<'a, C: MemoryManager> Trace<C> for ThingWithAPtr<C> {
+    impl<C: MemoryManager> Trace<C> for ThingWithAPtr<C> {
         fn trace(&mut self, gc: &GarbageCollector<C>, visitor: &mut C::VisitorTy) {
             println!("Was muvva fn called");
             visitor.mark(gc, &mut self.ptr);
@@ -467,7 +481,7 @@ mod tests {
     fn test_trace() {
         type OurThingWithAPtr<'a> = ThingWithAPtr<ThisCollector>;
 
-        let allocator = ThisCollector::new(NonZeroUsize::new(1 * 1_000_000).unwrap());
+        let allocator = ThisCollector::new(NonZeroUsize::new(1_000_000).unwrap());
         let gc = GarbageCollector::new(allocator);
         let value = ThisCollector::allocate(&gc, 420i32).unwrap();
         let mut value_two = ThisCollector::allocate(&gc, OurThingWithAPtr { ptr: value }).unwrap();
@@ -484,12 +498,12 @@ mod tests {
     #[test]
     #[should_panic]
     fn test_borrow() {
-        let allocator = ThisCollector::new(NonZeroUsize::new(1 * 1_000_000).unwrap());
+        let allocator = ThisCollector::new(NonZeroUsize::new(1_000_000).unwrap());
         let gc = GarbageCollector::new(allocator);
-        let mut value = ThisCollector::allocate(&gc, 420i32).unwrap();
+        let value = ThisCollector::allocate(&gc, 420i32).unwrap();
 
-        let borrow_one = value.get_mut(&gc);
-        let borrow_two = value.get(&gc);
+        let _borrow_one = value.get_mut(&gc);
+        let _borrow_two = value.get(&gc);
     }
 
     type Ptr<T> = <ThisCollector as MemoryManager>::Ptr<T>;
@@ -575,7 +589,7 @@ mod tests {
 
     #[test]
     fn test_vm() {
-        let allocator = ThisCollector::new(NonZeroUsize::new(1 * 1_000_000).unwrap());
+        let allocator = ThisCollector::new(NonZeroUsize::new(1_000_000).unwrap());
         let gc = GarbageCollector::new(allocator);
         let mut vm = EpicVM::new(gc);
         vm.eval(&[
@@ -614,6 +628,8 @@ mod tests {
             Instruction::Push(9),
             Instruction::Push(10),
             Instruction::Add,
+            Instruction::Push(1),
+            Instruction::Sub
         ]);
         assert_eq!(*vm.stack.pop().unwrap().get(&vm.gc), 19);
     }
