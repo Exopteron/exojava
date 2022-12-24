@@ -499,7 +499,7 @@ mod tests {
             ThisCollector::visit_with(&c.gc.clone(), |v| {
                 v.visit_noref(&c.gc.clone(), c);
             });
-            ThisCollector::collect(&c.gc);
+
 
             let end = c.gc.0.borrow().num_objects();
             return Value::Number((start - end) as f64);

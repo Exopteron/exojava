@@ -30,7 +30,7 @@ impl StructureBuilder {
         self.fields.push(f);
     }
 
-    pub fn build(mut self) -> BuiltStructure {
+    pub fn build(mut self) -> StructureDef {
         // sorted by size
         self.fields.sort_by(|a, b| b.size.cmp(&a.size));
 
@@ -89,7 +89,7 @@ impl StructureBuilder {
             offset += end_padding;
         }
 
-        BuiltStructure {
+        StructureDef {
             size: offset,
             align: structure_align,
             fields: output_fields,
@@ -99,20 +99,40 @@ impl StructureBuilder {
     }
 }
 
-pub struct BuiltStructure {
-    pub size: usize,
-    pub align: usize,
-    pub fields: Vec<OffsetSize>,
-    pub map: HashMap<String, usize>,
-    pub ordered: HashMap<usize, String>,
+pub struct StructureDef {
+    size: usize,
+    align: usize,
+    fields: Vec<OffsetSize>,
+    map: HashMap<String, usize>,
+    ordered: HashMap<usize, String>,
 }
+
+impl StructureDef {
+    pub fn size(&self) -> usize {
+        self.size
+    }
+
+    pub fn align(&self) -> usize {
+        self.align
+    }
+
+    pub fn fields(&self) -> &[OffsetSize] {
+        &self.fields
+    }
+
+    pub fn field_offset(&self, f: &str) -> Option<OffsetSize> {
+        let idx = self.map.get(f)?;
+        self.fields.get(*idx).copied()
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub struct OffsetSize {
     pub offset: usize,
     pub size: usize,
 }
 
-impl Debug for BuiltStructure {
+impl Debug for StructureDef {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let mut s = f.debug_struct(&format!(
             "BuiltStructure(size = {}, align = {})",

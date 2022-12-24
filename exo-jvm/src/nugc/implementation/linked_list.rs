@@ -148,9 +148,6 @@ impl LinkedListNode {
         self.start_addr() + self.size
     }
 
-    pub fn size(&self) -> usize {
-        self.size
-    }
 }
 
 /*

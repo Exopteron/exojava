@@ -67,7 +67,8 @@ pub struct ArrayType(pub ComponentType, pub usize);
 
 impl Parseable for ArrayType {
     fn parse(s: &mut exo_parser::LexerStream) -> exo_parser::error::Result<Self> {
-        let mut dimensions = 0;
+        s.token::<Char<'['>>()?;
+        let mut dimensions = 1;
         while s.token::<Char<'['>>().is_ok() {
             dimensions += 1;
         }
