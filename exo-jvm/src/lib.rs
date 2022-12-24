@@ -4,3 +4,4 @@
 pub mod memory;
 pub mod vm;
 pub use exo_class_file;
+pub mod structure;

@@ -63,12 +63,15 @@ impl Parseable for ObjectType {
 
 /// Array type.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct ArrayType(pub ComponentType);
+pub struct ArrayType(pub ComponentType, pub usize);
 
 impl Parseable for ArrayType {
     fn parse(s: &mut exo_parser::LexerStream) -> exo_parser::error::Result<Self> {
-        s.token::<Char<'['>>()?;
-        Ok(Self(Box::new(s.token()?.token)))
+        let mut dimensions = 0;
+        while s.token::<Char<'['>>().is_ok() {
+            dimensions += 1;
+        }
+        Ok(Self(Box::new(s.token()?.token), dimensions))
     }
 }
 

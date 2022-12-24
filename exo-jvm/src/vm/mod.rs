@@ -139,7 +139,7 @@ impl Jvm {
                 name: UnqualifiedName("buf".to_string()),
                 descriptor: FieldType::ArrayType(ArrayType(Box::new(FieldType::BaseType(
                     BaseType::Char,
-                )))),
+                )), 1)),
             };
 
             let string_constructor_desc = MethodNameAndType {
@@ -147,7 +147,7 @@ impl Jvm {
                 descriptor: MethodDescriptor {
                     parameters: vec![FieldType::ArrayType(ArrayType(Box::new(
                         FieldType::BaseType(BaseType::Char),
-                    )))],
+                    ), 1))],
                     return_desc: ReturnDescriptor::Void(Char),
                 },
             };
@@ -169,7 +169,7 @@ impl Jvm {
                                     name: UnqualifiedName("buf".to_string()),
                                     descriptor: FieldType::ArrayType(ArrayType(Box::new(
                                         FieldType::BaseType(BaseType::Char),
-                                    ))),
+                                    ), 1)),
                                 },
                                 char_array,
                             )?;
@@ -179,7 +179,7 @@ impl Jvm {
                                     name: UnqualifiedName("buf".to_string()),
                                     descriptor: FieldType::ArrayType(ArrayType(Box::new(
                                         FieldType::BaseType(BaseType::Char),
-                                    ))),
+                                    ), 1)),
                                 },
                             )?;;
                             //panic!("F {:?}", f);
@@ -223,7 +223,7 @@ impl Jvm {
                         FieldType::ObjectType(ObjectType {
                             class_name: string_class_name.clone(),
                         }),
-                    )))],
+                    ), 1))],
                     return_desc: ReturnDescriptor::Void(Char),
                 },
             };
