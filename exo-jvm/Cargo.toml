@@ -8,3 +8,5 @@ edition = "2021"
 [dependencies]
 exo-class-file = { path = "../exo-class-file" }
 ahash = "0.7"
+thiserror = "1.0"
+nugc-derive = { path = "src/nugc/nugc-derive" }

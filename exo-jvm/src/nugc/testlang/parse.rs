@@ -1,6 +1,6 @@
 use thiserror::Error;
 
-use crate::testlang::compile::{Inst, VarType};
+use super::super::testlang::compile::{Inst, VarType};
 
 use super::compile::Compiler;
 

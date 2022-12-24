@@ -59,6 +59,8 @@ version = "0.1.0"
 dependencies = [
  "ahash",
  "exo-class-file",
+ "nugc-derive",
+ "thiserror",
 ]
 
 [[package]]
@@ -127,14 +129,6 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn",
-]
-
-[[package]]
-name = "nugc"
-version = "0.1.0"
-dependencies = [
- "nugc-derive",
- "thiserror",
 ]
 
 [[package]]

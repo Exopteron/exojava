@@ -3,8 +3,7 @@ members = [
     "exo-class-file",
     "exo-class-file/exo-parser",
     "exo-jvm",
-    "exo-jvm/nugc",
-    "exo-jvm/nugc/nugc-derive",
+    "exo-jvm/src/nugc/nugc-derive",
     "java-compiler",
     "java-compiler/java-compiler-derive",
     "exo-java-bin"

@@ -18,6 +18,8 @@ pub trait MemoryManager: Sized {
         v: T,
     ) -> std::result::Result<Self::Ptr<T>, AllocationError>;
 
+
+    
     fn allocate_array<T>(
         collector: &GarbageCollector<Self>,
         v: &[T],

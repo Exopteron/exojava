@@ -1,7 +1,7 @@
 use core::num;
 use std::{collections::HashMap, fmt::Debug};
 
-use crate::{implementation::ThisCollector, collector::{GarbageCollector, Trace, MemoryManager, Visitor}};
+use super::super::{implementation::ThisCollector, collector::{GarbageCollector, Trace, MemoryManager, Visitor}};
 
 
 
@@ -193,7 +193,7 @@ impl Value {
 
 
 impl Trace<ThisCollector> for [Value] {
-    fn trace(&mut self, collector: &GarbageCollector<ThisCollector>, visitor: &mut <ThisCollector as crate::collector::MemoryManager>::VisitorTy) {
+    fn trace(&mut self, collector: &GarbageCollector<ThisCollector>, visitor: &mut <ThisCollector as super::super::collector::MemoryManager>::VisitorTy) {
         for v in self.iter_mut() {
             visitor.visit_noref(collector, v);
         }
@@ -201,7 +201,7 @@ impl Trace<ThisCollector> for [Value] {
 }
 
 impl Trace<ThisCollector> for Value {
-    fn trace(&mut self, collector: &GarbageCollector<ThisCollector>, visitor: &mut <ThisCollector as crate::collector::MemoryManager>::VisitorTy) {
+    fn trace(&mut self, collector: &GarbageCollector<ThisCollector>, visitor: &mut <ThisCollector as super::super::collector::MemoryManager>::VisitorTy) {
         match self {
             Value::Array(v) => visitor.visit(collector, v),
             _ => ()
@@ -433,7 +433,7 @@ mod tests {
     use core::num;
     use std::num::NonZeroUsize;
 
-    use crate::{testlang::{compile::Compiler, parse::{TokenStream, CharStream, Expr, NonTerminal, Stmt, Block}}, collector::{GarbageCollector, MemoryManager, Visitor}, implementation::ThisCollector};
+    use super::super::super::{testlang::{compile::Compiler, parse::{TokenStream, CharStream, Expr, NonTerminal, Stmt, Block}}, collector::{GarbageCollector, MemoryManager, Visitor}, implementation::ThisCollector};
 
     use super::{FunctionBlock, VarAllocator, ExecStack, Value};
 

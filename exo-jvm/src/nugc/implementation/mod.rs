@@ -8,7 +8,7 @@ use std::{
     ptr::{NonNull, Pointee},
 };
 
-use crate::collector::{AllocationError, GarbageCollector, MemoryManager, Trace, Visitor};
+use super::collector::{AllocationError, GarbageCollector, MemoryManager, Trace, Visitor};
 
 use self::linked_list::LinkedListAllocator;
 
@@ -236,7 +236,7 @@ impl MemoryManager for ThisCollector {
     type VisitorTy = PtrVisitor;
 
     fn allocate<T>(
-        collector: &crate::collector::GarbageCollector<Self>,
+        collector: &super::collector::GarbageCollector<Self>,
         v: T,
     ) -> std::result::Result<Self::Ptr<T>, AllocationError> {
         let layout = Layout::new::<T>();
@@ -251,7 +251,7 @@ impl MemoryManager for ThisCollector {
     }
 
     fn visit_with<'b, F: FnOnce(&mut Self::VisitorTy)>(
-        _collector: &'b crate::collector::GarbageCollector<Self>,
+        _collector: &'b super::collector::GarbageCollector<Self>,
         f: F,
     ) {
         let mut visitor = PtrVisitor;
@@ -318,7 +318,7 @@ mod tests {
     use std::{cell::RefCell, num::NonZeroUsize, ptr::Thin};
 
 
-    use crate::{
+    use super::super::{
         collector::{GarbageCollector, MemoryManager, Trace, Visitor},
         implementation::Mark,
     };
