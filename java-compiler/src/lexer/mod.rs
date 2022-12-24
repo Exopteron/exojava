@@ -1,10 +1,10 @@
 use std::{fmt::Display, num::ParseIntError};
 
 pub mod tokens;
-use tokens::early::BaseToken;
+
 use thiserror::Error;
 
-use self::tokens::early::unicode::UnicodeInputCharacter;
+
 
 
 #[derive(Error, Debug)]
@@ -50,7 +50,7 @@ mod tests {
         0b0011
         
         "#.to_string()).unwrap()).unwrap();
-        let x = 0x0f32;
+        let _x = 0x0f32;
         let i = Input::parse(&mut chars).unwrap();
         println!("{:#?}", i);
         // while !chars.is_finished() {

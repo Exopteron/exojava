@@ -9,7 +9,7 @@ pub struct JavaTokenStream {
 }
 
 impl JavaTokenStream {
-    pub fn new(mut s: Input) -> ParseResult<Self> {
+    pub fn new(s: Input) -> ParseResult<Self> {
         Ok(Self {
             chars: s.elements,
             position: 0,

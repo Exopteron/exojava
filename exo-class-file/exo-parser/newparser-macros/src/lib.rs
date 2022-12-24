@@ -1,6 +1,6 @@
-use proc_macro2::{TokenStream, Ident};
-use quote::{quote, TokenStreamExt};
-use syn::{Block, parse::{Parse, ParseStream, ParseBuffer}, token::Paren, ExprMatch, Pat, Token, punctuated::Punctuated, braced, parse_macro_input, Type};
+
+use quote::{quote};
+use syn::{Block, parse::{Parse, ParseStream}, Pat, Token, punctuated::Punctuated, Type};
 mod parser_macros;
 
 struct SwitchCase {
@@ -18,7 +18,7 @@ impl Parse for SwitchCase {
 
         let pattern = content.parse::<Pat>()?;
 
-        let fat_arrow: Token!(=>) = input.parse()?;
+        let _fat_arrow: Token!(=>) = input.parse()?;
 
         let block = input.parse::<Block>()?;
         Ok(Self {

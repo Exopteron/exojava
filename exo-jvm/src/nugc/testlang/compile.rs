@@ -1,4 +1,4 @@
-use core::num;
+
 use std::{collections::HashMap, fmt::Debug};
 
 use super::super::{implementation::ThisCollector, collector::{GarbageCollector, Trace, MemoryManager, Visitor}};
@@ -8,6 +8,12 @@ use super::super::{implementation::ThisCollector, collector::{GarbageCollector, 
 pub struct VarAllocator {
     number: usize,
     returned: Vec<usize>
+}
+
+impl Default for VarAllocator {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl VarAllocator {
@@ -47,6 +53,11 @@ pub struct VarScoperEntry {
 pub struct VarScoper {
     pub stack: Vec<VarScoperEntry>,
     pub alloc: VarAllocator
+}
+impl Default for VarScoper {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl VarScoper {
@@ -151,10 +162,10 @@ impl Debug for Value {
 impl Clone for Value {
     fn clone(&self) -> Self {
         match self {
-            Self::Number(arg0) => Self::Number(arg0.clone()),
-            Self::Array(arg0) => Self::Array(arg0.clone()),
+            Self::Number(arg0) => Self::Number(*arg0),
+            Self::Array(arg0) => Self::Array(*arg0),
             Self::Nil => Self::Nil,
-            Self::NativeFn(arg0) => Self::NativeFn(arg0.clone()),
+            Self::NativeFn(arg0) => Self::NativeFn(*arg0),
         }
     }
 }
@@ -204,7 +215,7 @@ impl Trace<ThisCollector> for Value {
     fn trace(&mut self, collector: &GarbageCollector<ThisCollector>, visitor: &mut <ThisCollector as super::super::collector::MemoryManager>::VisitorTy) {
         match self {
             Value::Array(v) => visitor.visit(collector, v),
-            _ => ()
+            Value::Number(_) | Value::Nil | Value::NativeFn(_) => (),
         }
     }
 }
@@ -247,6 +258,11 @@ pub struct ExecStack {
     pub stack: Vec<ExecStackEntry>
 }
 
+impl Default for ExecStack {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 impl ExecStack {
     pub fn new() -> Self {
         Self {
@@ -434,7 +450,7 @@ mod tests {
 
     use super::super::super::{testlang::{compile::Compiler, parse::{TokenStream, CharStream, NonTerminal, Block}}, collector::{GarbageCollector, MemoryManager, Visitor}, implementation::ThisCollector};
 
-    use super::{FunctionBlock, VarAllocator, ExecStack, Value};
+    use super::{FunctionBlock, ExecStack, Value};
 
     #[test]
     fn gamer_test() {
@@ -444,7 +460,7 @@ mod tests {
             fns: vec![FunctionBlock { insts: vec![], var_alloc: super::VarScoper::new() }],
             current_fn: 0,
             globals: vec![],
-            gc: gc,
+            gc,
             exec_stack: ExecStack {
                 stack: vec![]
             },
@@ -501,7 +517,7 @@ mod tests {
 
 
             let end = c.gc.0.borrow().num_objects();
-            return Value::Number((start - end) as f64);
+            Value::Number((start - end) as f64)
         }));
 
         compiler.globals.push(Value::NativeFn(|c| {

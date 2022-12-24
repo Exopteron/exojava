@@ -108,7 +108,7 @@ impl Attribute {
     }
     pub fn as_string(&self) -> &str {
         match self {
-            Attribute::Number(v) => panic!(),
+            Attribute::Number(_v) => panic!(),
             Self::String(v) => v
         }
     }
@@ -121,7 +121,7 @@ pub struct TokenStream {
     cursor: usize,
 }
 impl TokenStream {
-    pub fn new(compiler: &mut Compiler, mut s: CharStream) -> Self {
+    pub fn new(_compiler: &mut Compiler, mut s: CharStream) -> Self {
         let mut tokens = Vec::new();
 
         let mut not_nil = false;
@@ -490,7 +490,7 @@ impl NonTerminal<()> for Stmt {
                         VarType::Local(v) => {
                             Inst::StoreVar(v)
                         },
-                        VarType::Global(v) => {
+                        VarType::Global(_v) => {
                             panic!("No global")
                         }
                     };

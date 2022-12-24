@@ -629,7 +629,9 @@ mod tests {
             Instruction::Push(10),
             Instruction::Add,
             Instruction::Push(1),
-            Instruction::Sub
+            Instruction::Sub,
+            Instruction::Push(1),
+            Instruction::Add
         ]);
         assert_eq!(*vm.stack.pop().unwrap().get(&vm.gc), 19);
     }

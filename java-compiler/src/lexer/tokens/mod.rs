@@ -1,8 +1,8 @@
 use std::ops::Deref;
 
-use self::{early::{lines::{InputCharacter, LineTerminator}, BaseToken, CharStream, FinalTerminalElement}, stream::JavaTerminalStream, whitespace::Whitespace, comment::Comment, separators::Separator, operators::Operator, keywords::Keyword, identifier::Identifier, literal::Literal};
+use self::{early::{BaseToken, FinalTerminalElement}, stream::JavaTerminalStream, whitespace::Whitespace, comment::Comment, separators::Separator, operators::Operator, keywords::Keyword, identifier::Identifier, literal::Literal};
 
-use super::{LexErrorType, LexResult, LexingError};
+use super::{LexResult};
 
 pub mod comment;
 pub mod early;
@@ -77,7 +77,7 @@ impl Tokenizable for InputElement {
             FinalTerminalElement::LineTerminator(_) => true,
             FinalTerminalElement::InputCharacter(v) => v.0.is_whitespace(),
         } {
-            let w = s.get::<Whitespace>()?;
+            let _w = s.get::<Whitespace>()?;
             Ok(Self::Whitespace())
         } else {
             Ok(Self::Token(s.get()?))

@@ -5,7 +5,7 @@ use crate::lexer::{LexErrorType, LexingError};
 
 use self::number::integer::IntegerLiteral;
 
-use super::{early::{FinalTerminalElement, lines::InputCharacter}, Tokenizable, Token};
+use super::{early::{FinalTerminalElement}, Tokenizable, Token};
 
 #[derive(Clone, Debug)]
 pub enum Literal {

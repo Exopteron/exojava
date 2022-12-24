@@ -2,7 +2,7 @@ use std::{rc::Rc};
 
 use crate::lexer::{LexingError, LexErrorType};
 
-use super::{Token, Tokenizable, early::FinalTerminalElement, keywords::Keyword};
+use super::{Tokenizable, early::FinalTerminalElement, keywords::Keyword};
 
 #[derive(Clone, Debug)]
 pub struct Identifier(pub Rc<String>);

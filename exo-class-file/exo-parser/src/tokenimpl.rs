@@ -1,4 +1,4 @@
-use crate::{error::{ParsingError, ParsingErrorType}, tokens::{Lexer, Parseable}, parse_err, LexerRef, LexerStream};
+use crate::{error::{ParsingErrorType}, tokens::{Parseable}, parse_err, LexerStream};
 
 use super::error::Result;
 #[derive(Debug)]
