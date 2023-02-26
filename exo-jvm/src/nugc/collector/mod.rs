@@ -1,16 +1,22 @@
-use std::{alloc::LayoutError, cell::RefCell, rc::Rc};
+use std::{alloc::LayoutError, cell::RefCell, mem::{MaybeUninit, size_of, align_of}, rc::Rc, ptr::Pointee, sync::{atomic::{Ordering, AtomicU64}, Arc}};
 
-use exo_class_file::item::ids::field::{FieldType, ArrayType};
+use exo_class_file::item::ids::field::{ArrayType, FieldType};
+use parking_lot::Mutex;
 use thiserror::Error;
 
 pub type TheGc = ThisCollector;
 
 use crate::{
     nugc::implementation::GcPtr,
-    structure::{OffsetSize, StructureDef}, value::{types::{JavaTypes, FieldNameAndType, ExactJavaType, GC_PTR_SIZE, PrimitiveType}, JVMResult, JavaType},
+    structure::{OffsetSize, StructureDef},
+    value::{
+        types::{ExactJavaType, FieldNameAndType, JavaTypes, PrimitiveType, GC_PTR_SIZE},
+        JVMResult, JavaType,
+    },
+    vm::JVM,
 };
 
-use super::implementation::{GcMut, ThisCollector};
+use super::implementation::{GcMut, NonNullGcPtr, ThisCollector, OwnedGcPtr, VisitorTy};
 
 #[derive(Error, Debug)]
 pub enum AllocationError {
@@ -19,99 +25,41 @@ pub enum AllocationError {
     #[error("Layout error: {0}")]
     LayoutError(LayoutError),
     #[error("Null pointer")]
-    NullPointer
+    NullPointer,
+    #[error("Invalid dynamic size {0}")]
+    InvalidDynamicSize(usize),
 }
 #[repr(C)]
 pub struct Structure {
     schema: GcPtr<StructureDef>,
+    null_set: AtomicU64,
     data: [u8],
 }
 
-#[repr(C)]
-pub struct ArrayStructure {
-    ty: GcPtr<ExactJavaType>,
-    length: u32,
-    data: [u8]
-}
 
-impl ArrayStructure {
-    /// FIXME: remove when the JVM struct is real
-    pub fn get_array_value(&mut self, gc: &GarbageCollector<TheGc>, index: usize) -> JVMResult<GcPtr<ArrayStructure>> {
-        if index > self.length as usize {
-            return Err(());
-        }
-        if !matches!(*self.ty.get(gc).ok_or(())?, ExactJavaType::Array(_)) {
-            return Err(());
-        }
-        unsafe {
-            let v = self.data.as_ptr().add(GC_PTR_SIZE * index) as *const GcPtr<ArrayStructure>;
-            Ok(*v)
-        }
+unsafe impl GcObject for Structure {
+    const MIN_SIZE_ALIGN: (usize, usize) = (size_of::<GcPtr<StructureDef>>() + size_of::<u64>(), align_of::<GcPtr<StructureDef>>());
 
+    const NULLABLE: bool = true;
+
+    const DST: bool = true;
+
+    fn valid_dynamic_size(size: usize) -> bool {
+        true
     }
 
-    /// FIXME: remove when the JVM struct is real
-    pub fn set_array_value(&mut self, gc: &GarbageCollector<TheGc>, index: usize, structure: GcPtr<ArrayStructure>) -> JVMResult<()> {
-        if index > self.length as usize {
-            return Err(());
-        }
-        if !matches!(*self.ty.get(gc).ok_or(())?, ExactJavaType::Array(_)) {
-            return Err(());
-        }
-        unsafe {
-            let v = self.data.as_mut_ptr().add(GC_PTR_SIZE * index) as *mut GcPtr<ArrayStructure>;
-            v.write(structure);
-            Ok(())
-        }
-
+    fn trace(
+        &mut self,
+        gc: &GarbageCollector,
+        visitor: &mut VisitorTy,
+    ) {
+        todo!()
     }
 
-    pub fn get_primitive<T: PrimitiveType>(&mut self, gc: &GarbageCollector<TheGc>, index: usize) -> JVMResult<T> {
-        if T::get_type() != (*self.ty.get(gc).ok_or(())?).into() {
-            return Err(());
-        }
-        if index > self.length as usize {
-            return Err(());
-        }
-        unsafe {
-            let v = self.data.as_ptr().add(T::get_type().size() * index) as *const T;
-            Ok(*v)
-        }
-    }
-
-    pub fn set_primitive<T: PrimitiveType>(&mut self, gc: &GarbageCollector<TheGc>, index: usize, val: T) -> JVMResult<()> {
-        if T::get_type() != (*self.ty.get(gc).ok_or(())?).into() {
-            return Err(());
-        }
-        if index > self.length as usize {
-            return Err(());
-        }
-        unsafe {
-            let v = self.data.as_mut_ptr().add(T::get_type().size() * index) as *mut T;
-            v.write(val);
-            Ok(())
-        }
+    fn finalize(this: NonNullGcPtr<Self>, j: JVM) {
+        
     }
 }
-
-
-impl Trace<TheGc> for ArrayStructure {
-    fn trace(&mut self, gc: &GarbageCollector<TheGc>, visitor: &mut <TheGc as MemoryManager>::VisitorTy) {
-        // FIXME: should probably movve this into exact type's tracer
-        visitor.mark(gc, &mut self.ty);
-        if let Some(ty) = self.ty.get(gc) {
-            if matches!(*ty, ExactJavaType::Array(_)) {
-                for i in 0..(self.length as usize) {
-                    let array: &mut GcPtr<ArrayStructure> = unsafe { (self.data.as_ptr().add(i * GC_PTR_SIZE) as *mut GcPtr<ArrayStructure>).as_mut().unwrap() };
-                    visitor.visit(gc, array);
-                }
-            } else if matches!(*ty, ExactJavaType::ClassInstance(_)) {
-                todo!();
-            }
-        }
-    }
-}
-
 
 #[derive(Debug, Error)]
 pub enum StructureError {
@@ -119,191 +67,179 @@ pub enum StructureError {
     AllocationError(AllocationError),
 
     #[error("no such native field: {0}")]
-    NoNativeField(String)
+    NoNativeField(String),
 }
 
 impl Structure {
-    unsafe fn gc_ptr_at<T: ?Sized>(&mut self, off: OffsetSize) -> &mut GcPtr<T> {
-        (self.data.as_ptr().add(off.offset) as *mut GcPtr<T>).as_mut().unwrap()
+    pub fn create(gc: &GarbageCollector, def: GcPtr<StructureDef>) -> JVMResult<GcPtr<Self>> {
+        let s = def.get(gc).unwrap().size();
+        let v = gc.allocate_dst::<Self>(s, s).map_err(|_| ())?;
+        let mut ptr = v.get_mut(gc).unwrap();
+        ptr.schema = def;
+        ptr.null_set = AtomicU64::new(0);
+        Ok(v)
     }
 
-    
-    pub fn write_native_field<T: 'static>(
-        &mut self,
-        gc: &GarbageCollector<TheGc>,
-        field: &str,
-        value: T,
-    ) -> Result<(), StructureError> {
-        let (id, f) = self
-            .schema
-            .get(gc)
-            .expect("Schema should not be null")
-            .native_field_offset(field).ok_or_else(|| StructureError::NoNativeField(field.to_string()))?;
-        assert_eq!(id, std::any::TypeId::of::<T>(), "Invalid type!");
-
-        let new_value = gc.allocate(value).map_err(StructureError::AllocationError)?;
-        unsafe {
-            std::ptr::write(self.data.as_ptr().add(f.offset) as *mut _, new_value);
+    pub fn initialize_field<T: GcObject + Sized>(&self, gc: &GarbageCollector, name: &str, value: T) {
+        if !self.is_field_nullable(gc, name) && self.is_field_present(gc, name).unwrap() {
+            panic!("Already initialized");
         }
-        Ok(())
+
+        if !self.is_field_nullable(gc, name) {
+            self.set_field_present(gc, name);
+        }
+
         
-
     }
 
-    /// # Safety
-    /// This structure must come from the gc `gc`.
-    pub unsafe fn native_field<T: 'static>(
-        &mut self,
-        gc: &GarbageCollector<TheGc>,
-        field: &str,
-    ) -> Option<GcMut<'_, T>> {
-        let (id, f) = self.schema.get(gc)?.native_field_offset(field)?;
-
-        assert_eq!(id, std::any::TypeId::of::<T>(), "Invalid type!");
-
-        let ptr: &mut GcPtr<T> = unsafe { self.gc_ptr_at::<T>(f) };
-        ptr.get_mut(gc)
+    fn is_field_nullable(&self, gc: &GarbageCollector, name: &str) -> bool {
+        let f = self.schema.get(gc).unwrap();
+        f.native_field(name).unwrap().nullable_index.is_none()
     }
-}
-impl Trace<TheGc> for Structure {
-    fn trace(
-        &mut self,
-        gc: &GarbageCollector<TheGc>,
-        visitor: &mut <TheGc as MemoryManager>::VisitorTy,
-    ) {
-        visitor.visit(gc, &mut self.schema);
-        if let Some(schema) = self.schema.get(gc) {
-            for (_, (_, off, trace)) in schema.native_fields() {
-                let p = unsafe { self.gc_ptr_at(off) };
-                trace(p, gc, visitor);
-            }
 
-            for (field_name, (off, ty)) in schema.java_fields() {
-
-                if let ExactJavaType::ClassInstance(_) = ty {
-                    let p: &mut GcPtr<Structure> = unsafe { self.gc_ptr_at(off) };
-                    visitor.visit(gc, p);
-                } else if let ExactJavaType::Array(_) = ty {
-                    let p: &mut GcPtr<ArrayStructure> = unsafe { self.gc_ptr_at(off) };
-                    visitor.visit(gc, p);
-                }
-            }
-        }
+    fn set_field_present(&self, gc: &GarbageCollector, name: &str) -> Option<()> {
+        let f = self.schema.get(gc)?;
+        let i = f.native_field(name)?.nullable_index?.get();
+        let bit = 1u64 << i as u64;
+        self.null_set.fetch_or(bit, Ordering::Relaxed);
+        Some(())
+    }
+    fn is_field_present(&self, gc: &GarbageCollector, name: &str) -> Option<bool> {
+        let f = self.schema.get(gc)?;
+        let i = f.native_field(name)?.nullable_index?.get();
+        let bit = 1u64 << i as u64;
+        Some((self.null_set.load(Ordering::Relaxed) & bit) > 0)
     }
 }
 
-pub trait MemoryManager: Sized {
-    type Ptr<T: ?Sized>: Copy;
-    type OwnedPtr<T: ?Sized>: Clone;
 
-    type VisitorTy: Visitor<Self>;
-
-    fn allocate<T>(
-        collector: &GarbageCollector<Self>,
-        v: T,
-    ) -> std::result::Result<Self::Ptr<T>, AllocationError>;
-
-    fn allocate_array(
-        collector: &GarbageCollector<Self>,
-        ty: Self::Ptr<ExactJavaType>,
-        size: u32,
-    ) -> std::result::Result<Self::Ptr<ArrayStructure>, AllocationError>;
-
-    fn allocate_structure(
-        collector: &GarbageCollector<Self>,
-        structure: Self::Ptr<StructureDef>,
-    ) -> std::result::Result<Self::Ptr<Structure>, AllocationError>;
-
-    fn new_global_ref<T: ?Sized>(
-        collector: &GarbageCollector<Self>,
-        v: Self::Ptr<T>,
-    ) -> std::result::Result<Self::OwnedPtr<T>, AllocationError>;
-
-    /// Perform a garbage collection run.
-    fn visit_with<F: FnOnce(&mut Self::VisitorTy)>(collector: &GarbageCollector<Self>, f: F);
-
-    fn collector_id(collector: &GarbageCollector<Self>) -> u32;
-    fn collection_index(collector: &GarbageCollector<Self>) -> usize;
-}
-
-pub trait Visitor<Gc: MemoryManager> {
-    fn visit<T: ?Sized + Trace<Gc>>(
+pub trait Visitor {
+    fn visit<T: ?Sized + GcObject>(
         &mut self,
-        collector: &GarbageCollector<Gc>,
-        object: &mut Gc::Ptr<T>,
+        collector: &GarbageCollector,
+        object: &mut GcPtr<T>,
     );
     fn mark<T: ?Sized>(
         &mut self,
-        collector: &GarbageCollector<Gc>,
-        object: &mut Gc::Ptr<T>,
+        collector: &GarbageCollector,
+        object: &mut GcPtr<T>,
     ) -> bool;
 
-    fn visit_noref<T: ?Sized + Trace<Gc>>(
+    fn visit_noref<T: ?Sized + GcObject>(
         &mut self,
-        collector: &GarbageCollector<Gc>,
+        collector: &GarbageCollector,
         object: &mut T,
     );
 }
 
-pub trait Trace<Gc: MemoryManager> {
-    fn trace(&mut self, gc: &GarbageCollector<Gc>, visitor: &mut Gc::VisitorTy);
-}
+/// # Safety
+/// MIN_SIZE_ALIGN must be the minimum valid size and alignment of any instance of this type.
+pub unsafe trait GcObject {
+    const MIN_SIZE_ALIGN: (usize, usize);
+    const NULLABLE: bool;
+    const DST: bool;
 
-pub trait Finalize<'col, Gc: MemoryManager> {
-    fn finalize(self);
-}
+    fn valid_dynamic_size(size: usize) -> bool;
+    fn trace(
+        &mut self,
+        gc: &GarbageCollector,
+        visitor: &mut VisitorTy,
+    );
+    fn finalize(this: NonNullGcPtr<Self>, j: JVM);
 
-struct Epic<Gc: MemoryManager> {
-    ptr: Gc::Ptr<i32>,
-}
-
-impl<Gc: MemoryManager> Trace<Gc> for Epic<Gc> {
-    fn trace(&mut self, gc: &GarbageCollector<Gc>, visitor: &mut Gc::VisitorTy) {
-        visitor.mark(gc, &mut self.ptr);
+    fn vtable() -> GcObjectVtable {
+        GcObjectVtable {
+            tracer: |self_ptr, gc, tracer| {
+                let v: &mut GcPtr<Self> = unsafe { std::mem::transmute(self_ptr) };
+                tracer.visit(gc, v);
+                let mut this = v.get_mut(gc).unwrap();
+                this.trace(gc, tracer);
+            },
+            finalizer: |self_ptr, jvm| {
+                let v: NonNullGcPtr<Self> = unsafe { std::mem::transmute(self_ptr) };
+                Self::finalize(v, jvm);
+            },
+            dropper: |self_ptr, meta| {
+                
+                let v: *mut Self = unsafe { std::ptr::from_raw_parts_mut(self_ptr, std::mem::transmute_copy::<usize, <Self as Pointee>::Metadata>(&meta)) };
+                unsafe {
+                    std::ptr::drop_in_place(v);
+                }
+            },
+        }
     }
 }
 
-pub struct GarbageCollector<M: MemoryManager>(pub Rc<RefCell<M>>);
 
-impl<M: MemoryManager> GarbageCollector<M> {
-    pub fn new(collector: M) -> Self {
-        Self(Rc::new(RefCell::new(collector)))
+type ObjTraceFn = fn(
+    &mut GcPtr<()>,
+    gc: &GarbageCollector,
+    visitor: &mut VisitorTy,
+);
+
+type ObjFinalizerFn = fn(crate::nugc::implementation::NonNullGcPtr<()>, JVM);
+
+type ObjDropFn = fn(*mut (), usize);
+#[derive(Clone, Copy)]
+pub struct GcObjectVtable {
+    pub tracer: ObjTraceFn,
+    pub finalizer: ObjFinalizerFn,
+    pub dropper: ObjDropFn,
+}
+
+pub const fn make_finalizer<F: GcObject + ?Sized>() -> ObjFinalizerFn {
+    |this, j| unsafe { F::finalize(std::mem::transmute(this), j) }
+}
+
+pub struct GarbageCollector(pub Arc<Mutex<TheGc>>);
+
+
+impl GarbageCollector {
+    pub fn new(collector: TheGc) -> Self {
+        Self(Arc::new(Mutex::new(collector)))
     }
 
-    pub fn allocate<T>(&self, v: T) -> std::result::Result<M::Ptr<T>, AllocationError> {
-        M::allocate(self, v)
-    }
-
-    pub fn allocate_array(&self, ty: M::Ptr<ExactJavaType>, size: u32) -> std::result::Result<M::Ptr<ArrayStructure>, AllocationError> {
-        M::allocate_array(self, ty, size)
-    }
-
-    pub fn allocate_structure(
+    pub fn allocate<T: GcObject + Sized>(
         &self,
-        structure: M::Ptr<StructureDef>,
-    ) -> std::result::Result<M::Ptr<Structure>, AllocationError> {
-        M::allocate_structure(self, structure)
+        v: T,
+    ) -> std::result::Result<GcPtr<T>, AllocationError> {
+        TheGc::allocate(self, v)
     }
 
-    pub fn visit_with<F: FnOnce(&mut M::VisitorTy)>(&self, f: F) {
-        M::visit_with(self, f)
+    pub fn allocate_dst<T: GcObject + ?Sized>(
+        &self,
+        excess_size: usize,
+        meta: usize,
+    ) -> std::result::Result<GcPtr<T>, AllocationError> {
+        TheGc::allocate_dst(self, excess_size, meta)
     }
 
-    pub fn collector_id(&self) -> u32 {
-        M::collector_id(self)
+    // pub fn allocate_native_array<T>(
+    //     &self,
+    //     len: usize,
+    // ) -> std::result::Result<TheGc::Ptr<[MaybeUninit<T>]>, AllocationError> {
+    //     TheGc::allocate_native_array(self, len)
+    // }
+
+    pub fn visit_with<F: FnMut(&mut VisitorTy)>(&self, jvm: JVM, f: F) {
+        TheGc::visit_with(jvm, f)
     }
-    pub fn collection_index(&self) -> usize {
-        M::collection_index(self)
+
+    pub fn collector_id(&self) -> u8 {
+        TheGc::collector_id(self)
+    }
+    pub fn collection_index(&self) -> u8 {
+        TheGc::collection_index(self)
     }
 
     pub fn new_global_ref<T: ?Sized>(
         &self,
-        v: M::Ptr<T>,
-    ) -> std::result::Result<M::OwnedPtr<T>, AllocationError> {
-        M::new_global_ref(self, v)
+        v: GcPtr<T>,
+    ) -> std::result::Result<OwnedGcPtr<T>, AllocationError> {
+        TheGc::new_global_ref(self, v)
     }
 }
-impl<M: MemoryManager> Clone for GarbageCollector<M> {
+impl Clone for GarbageCollector {
     fn clone(&self) -> Self {
         Self(self.0.clone())
     }

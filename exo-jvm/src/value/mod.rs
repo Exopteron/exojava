@@ -1,26 +1,26 @@
-use std::num::NonZeroUsize;
+// use std::num::NonZeroUsize;
 
-pub mod types;
+// use crate::vm::JVM;
 
-
-
-use crate::nugc::{implementation::ThisCollector, collector::GarbageCollector};
+// pub mod types;
 
 
-// temp
-pub type JVM = GarbageCollector<ThisCollector>;
 
-pub type JVMResult<T> = std::result::Result<T, ()>;
+// // use crate::{nugc::{implementation::ThisCollector, collector::GarbageCollector}, vm::JVM};
 
 
-pub trait JavaType {
-    fn size(&self) -> usize;
-    fn align(&self) -> NonZeroUsize;
-}  
+// // temp
+// pub type JVMResult<T> = std::result::Result<T, ()>;
 
 
-/// Casting between Java objects.
-pub trait Cast<Output>: JavaType {
+// pub trait JavaType {
+//     fn size(&self) -> usize;
+//     fn align(&self) -> NonZeroUsize;
+// }  
 
-    fn cast(self, j: JVM) -> JVMResult<Output>;
-}
+
+// /// Casting between Java objects.
+// pub trait Cast<Output>: JavaType {
+
+//     fn cast(self, j: &JVM) -> JVMResult<Output>;
+// }

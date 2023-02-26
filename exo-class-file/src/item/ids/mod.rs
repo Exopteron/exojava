@@ -1,3 +1,5 @@
+use std::rc::Rc;
+
 use exo_parser::{Parseable, parse_err, error::ParsingErrorType, Lexer, LexerRef};
 
 pub mod class;
@@ -10,7 +12,7 @@ pub const BANNED_IDENT_CHARS: [char; 4] = ['.', ';', '[', '/'];
 
 /// Unqualified name.
 #[derive(Debug, Clone, Hash, PartialEq, Eq, PartialOrd, Ord)]
-pub struct UnqualifiedName(pub String);
+pub struct UnqualifiedName(pub Rc<String>);
 
 impl UnqualifiedName {
     pub fn new(s: String) -> Option<Self> {
@@ -30,6 +32,6 @@ impl Parseable for UnqualifiedName {
         if str.is_empty() {
             return Err(parse_err!(s, "empty unqualified name"));
         }
-        Ok(Self(str))
+        Ok(Self(Rc::new(str)))
     }
 }

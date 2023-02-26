@@ -1,8 +1,8 @@
 use exo_class_file::item::ids::{UnqualifiedName, field::{FieldDescriptor, FieldType, BaseType}, method::{MethodDescriptor, MethodName}};
 
-use crate::nugc::{implementation::{GcPtr, OwnedGcPtr}, collector::{Structure, Trace, TheGc, Visitor}};
+// use crate::{nugc::{implementation::{GcPtr, OwnedGcPtr, NonNullGcPtr}, collector::{TheGc, Visitor}}, vm::JVM};
 
-use super::JavaType;
+use super::{JavaType, Cast};
 
 pub type JByte = i8;
 pub type JShort = i16;
@@ -97,8 +97,8 @@ pub enum JavaTypes {
     Boolean,
     Object,
 }
-pub const GC_PTR_SIZE: usize = std::mem::size_of::<GcPtr<()>>();
-pub const GC_PTR_ALIGN: usize = std::mem::align_of::<GcPtr<()>>();
+// pub const GC_PTR_SIZE: usize = std::mem::size_of::<GcPtr<()>>();
+// pub const GC_PTR_ALIGN: usize = std::mem::align_of::<GcPtr<()>>();
 impl JavaType for JavaTypes {
     fn size(&self) -> usize {
         match self {
@@ -110,7 +110,7 @@ impl JavaType for JavaTypes {
             JavaTypes::Float => std::mem::size_of::<JFloat>(),
             JavaTypes::Double => std::mem::size_of::<JDouble>(),
             JavaTypes::Boolean => std::mem::size_of::<JBoolean>(),
-            JavaTypes::Object => GC_PTR_SIZE,
+            JavaTypes::Object => todo!(),
         }
     }
 
@@ -124,7 +124,7 @@ impl JavaType for JavaTypes {
             JavaTypes::Float => std::mem::align_of::<JFloat>(),
             JavaTypes::Double => std::mem::align_of::<JDouble>(),
             JavaTypes::Boolean => std::mem::align_of::<JBoolean>(),
-            JavaTypes::Object => GC_PTR_ALIGN,
+            JavaTypes::Object => todo!(),
         })
         .unwrap()
     }
@@ -178,8 +178,8 @@ impl AsRef<JavaTypes> for ExactJavaType {
             ExactJavaType::Float => &JavaTypes::Float,
             ExactJavaType::Double => &JavaTypes::Double,
             ExactJavaType::Boolean => &JavaTypes::Boolean,
-            ExactJavaType::Array(_) => &JavaTypes::Object,
-            ExactJavaType::ClassInstance(_) => &JavaTypes::Object,
+            ExactJavaType::Array(_, _) => &JavaTypes::Object,
+            // ExactJavaType::ClassInstance(_) => &JavaTypes::Object,
         }
     }
 }
@@ -192,8 +192,41 @@ impl From<ExactJavaType> for JavaTypes {
 
 
 
+#[derive(Clone, Copy)]
+pub enum ArrayMember {
+    Primitive(BaseType),
+    //ClassInstance(GcPtr<Structure>)
+}
 
+// impl Trace<TheGc> for ArrayMember {
+//     fn trace(&mut self, gc: &crate::nugc::collector::GarbageCollector<TheGc>, visitor: &mut <TheGc as crate::nugc::collector::MemoryManager>::VisitorTy) {
+//         if let Self::ClassInstance(v) = self {
+//             visitor.visit(gc, v);
+//         }
+//     }
+// }
 
+impl Cast<ArrayMember> for ExactJavaType {
+    fn cast(self, _: &crate::vm::JVM) -> super::JVMResult<ArrayMember> {
+
+        match self {
+            ExactJavaType::Byte => Ok(ArrayMember::Primitive(BaseType::Byte)),
+            ExactJavaType::Short => Ok(ArrayMember::Primitive(BaseType::Short)),
+            ExactJavaType::Int => Ok(ArrayMember::Primitive(BaseType::Int)),
+            ExactJavaType::Long => Ok(ArrayMember::Primitive(BaseType::Long)),
+            ExactJavaType::Char => Ok(ArrayMember::Primitive(BaseType::Char)),
+            ExactJavaType::Float => Ok(ArrayMember::Primitive(BaseType::Float)),
+            ExactJavaType::Double => Ok(ArrayMember::Primitive(BaseType::Double)),
+            ExactJavaType::Boolean => Ok(ArrayMember::Primitive(BaseType::Boolean)),
+            ExactJavaType::Array(_, _) => Err(()),
+            // ExactJavaType::ClassInstance(v) => Ok(ArrayMember::ClassInstance(v)),
+        }
+    }
+}
+
+// impl Finalize for ExactJavaType {
+//     unsafe fn finalize(_: NonNullGcPtr<Self>, _: JVM) {}
+// }
 
 #[derive(Clone, Copy)]
 pub enum ExactJavaType {
@@ -205,8 +238,18 @@ pub enum ExactJavaType {
     Float,
     Double,
     Boolean,
-    Array(GcPtr<ExactJavaType>),
-    ClassInstance(GcPtr<Structure>)
+    Array(ArrayMember, usize),
+    //ClassInstance(GcPtr<Structure>)
+}
+
+impl JavaType for ExactJavaType {
+    fn size(&self) -> usize {
+        JavaTypes::from(*self).size()
+    }
+
+    fn align(&self) -> std::num::NonZeroUsize {
+        JavaTypes::from(*self).align()
+    }
 }
 
 impl From<BaseType> for ExactJavaType {
@@ -225,15 +268,15 @@ impl From<BaseType> for ExactJavaType {
     }
 }
 
-impl Trace<TheGc> for ExactJavaType {
-    fn trace(&mut self, gc: &crate::nugc::collector::GarbageCollector<TheGc>, visitor: &mut <TheGc as crate::nugc::collector::MemoryManager>::VisitorTy) {
-        match self {
-            Self::Array(v) => visitor.visit(gc, v),
-            Self::ClassInstance(v) => visitor.visit(gc, v),
-            _ => ()
-        }
-    }
-}
+// impl Trace<TheGc> for ExactJavaType {
+//     fn trace(&mut self, gc: &crate::nugc::collector::GarbageCollector<TheGc>, visitor: &mut <TheGc as crate::nugc::collector::MemoryManager>::VisitorTy) {
+//         match self {
+//             Self::Array(v, _) => visitor.visit_noref(gc, v),
+//             Self::ClassInstance(v) => visitor.visit(gc, v),
+//             _ => ()
+//         }
+//     }
+// }
 
 
 /// Field name and descriptor.

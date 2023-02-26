@@ -1,9 +1,9 @@
 //! The core JVM implementation.
-#![feature(ptr_metadata)]
-#![feature(cell_update)]
+#![feature(specialization,arbitrary_self_types,  inline_const, cell_update, ptr_metadata, core_intrinsics, pointer_byte_offsets)]
 
 pub use exo_class_file;
-pub mod structure;
+// pub mod structure;
 pub mod nugc;
+pub mod vm;
 
 mod value;

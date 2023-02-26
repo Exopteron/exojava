@@ -10,3 +10,7 @@ exo-class-file = { path = "../exo-class-file" }
 ahash = "0.7"
 thiserror = "1.0"
 nugc-derive = { path = "src/nugc/nugc-derive" }
+static_assertions = "1"
+nonmax = "0.5"
+parking_lot = "0.12"
+fnv = "1.0"

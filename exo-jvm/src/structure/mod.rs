@@ -1,84 +1,97 @@
-use std::{collections::HashMap, fmt::Debug, any::TypeId};
+use std::{any::TypeId, collections::HashMap, fmt::Debug, mem::{size_of, align_of}};
 
+use exo_class_file::item::ids::{
+    field::{FieldDescriptor, FieldType},
+    UnqualifiedName,
+};
+use nonmax::NonMaxU8;
 
-use exo_class_file::item::ids::{field::{FieldDescriptor, FieldType}, UnqualifiedName};
-
-use crate::{value::{JavaType, types::{JavaTypes, FieldNameAndType, ExactJavaType}}, nugc::{collector::{TheGc, MemoryManager, GarbageCollector, Trace, Visitor, AllocationError}, implementation::GcPtr}};
-
-type FieldTraceFn = fn(&mut GcPtr<()>, gc: &GarbageCollector<TheGc>, visitor: &mut <TheGc as MemoryManager>::VisitorTy);
-
-
-enum FieldDefType {
-    Java {
-        name: UnqualifiedName,
-        ty: ExactJavaType
+use crate::{
+    nugc::{
+        collector::{
+            AllocationError, GarbageCollector, GcObject, TheGc,
+            Visitor, GcObjectVtable,
+        },
+        implementation::{GcPtr, NonNullGcPtr, VisitorTy},
     },
-    Native {
-        name: String,
-        ty: TypeId,
-        trace: FieldTraceFn,
-    }
-}
+    value::{
+        types::{ExactJavaType, FieldNameAndType, JavaTypes},
+        Cast, JVMResult, JavaType,
+    },
+    vm::JVM,
+};
 
 /// A field definition.
 pub struct FieldDef {
-    ty: FieldDefType,
+    pub ty: TypeId,
+    pub nullable: bool,
     pub size: usize,
     pub align: usize,
+    pub name: String,
+    pub fns: GcObjectVtable
 }
 
 impl FieldDef {
-    pub fn new_java(gc: &GarbageCollector<TheGc>, descriptor: FieldNameAndType) -> Result<Self, AllocationError> {
-
-        fn wrap(gc: &GarbageCollector<TheGc>, f: &FieldType) -> Result<ExactJavaType, AllocationError> {
-            Ok(match f {
-                exo_class_file::item::ids::field::FieldType::BaseType(v) => (*v).into(),
-                exo_class_file::item::ids::field::FieldType::ObjectType(v) => ExactJavaType::ClassInstance(GcPtr::NULL),
-                exo_class_file::item::ids::field::FieldType::ArrayType(ar) => {
-                    let mut v = wrap(gc, &ar.0)?;
-                    let mut count = ar.1;
-                    while count > 0 {
-                        v = ExactJavaType::Array(gc.allocate(v)?);
-                        count -= 1;
-                    }
-                    v
-                },
-            })
-        }
-
-        Ok(Self {
-            size: (descriptor.descriptor.as_ref()).size(),
-            align: (descriptor.descriptor.as_ref()).align().get(),
-            ty: FieldDefType::Java {
-                name: descriptor.name,
-                ty: wrap(gc, &descriptor.descriptor)?
+    pub fn new<T: GcObject + Sized + 'static>(name: String) -> JVMResult<Self> {
+        const {
+            if T::DST {
+                panic!("Must not be DST");
             }
+        };
+        Ok(Self {
+            ty: TypeId::of::<T>(),
+            nullable: T::NULLABLE,
+            size: T::MIN_SIZE_ALIGN.0,
+            align: T::MIN_SIZE_ALIGN.1,
+            name,
+            fns: T::vtable(),
         })
     }
+    // pub fn new_java(gc: &JVM, descriptor: FieldNameAndType) -> JVMResult<Self> {
 
-    pub fn new_native<T: 'static>(name: String) -> Self {
-        Self {
-            size: JavaTypes::Object.size(),
-            align: JavaTypes::Object.align().get(),
-            ty: FieldDefType::Native { name, ty: std::any::TypeId::of::<T>() , trace: |self_ptr, gc, tracer| {
-                let v: &mut GcPtr<T> = unsafe { std::mem::transmute(self_ptr) };
-                tracer.mark(gc, v);
-            }}
-        }
-    }
-    pub fn new_native_traced<T: 'static + Trace<TheGc>>(name: String) -> Self {
-        Self {
-            size: JavaTypes::Object.size(),
-            align: JavaTypes::Object.align().get(),
-            ty: FieldDefType::Native { name, ty: std::any::TypeId::of::<T>() , trace: |self_ptr, gc, tracer| {
-                let v: &mut GcPtr<T> = unsafe { std::mem::transmute(self_ptr) };
-                tracer.visit(gc, v);
-                let mut this = v.get_mut(gc).unwrap();
-                this.trace(gc, tracer);
-            }}
-        }
-    }
+    //     fn wrap(gc: &JVM, f: &FieldType) -> JVMResult<ExactJavaType> {
+    //         Ok(match f {
+    //             exo_class_file::item::ids::field::FieldType::BaseType(v) => (*v).into(),
+    //             exo_class_file::item::ids::field::FieldType::ObjectType(v) => ExactJavaType::ClassInstance(GcPtr::NULL),
+    //             exo_class_file::item::ids::field::FieldType::ArrayType(ar) => {
+    //                 let mut v = wrap(gc, &ar.0)?;
+    //                 ExactJavaType::Array(v.cast(gc)?, ar.1)
+    //             },
+    //         })
+    //     }
 
+    //     Ok(Self {
+    //         size: (descriptor.descriptor.as_ref()).size(),
+    //         align: (descriptor.descriptor.as_ref()).align().get(),
+    //         ty: FieldDefType::Java {
+    //             name: descriptor.name,
+    //             ty: wrap(gc, &descriptor.descriptor)?
+    //         }
+    //     })
+    // }
+
+    // pub fn new_native<T: 'static>(name: String) -> Self {
+    //     Self {
+    //         size: JavaTypes::Object.size(),
+    //         align: JavaTypes::Object.align().get(),
+    //         ty: FieldDefType::Native { name, ty: std::any::TypeId::of::<T>() , trace: |self_ptr, gc, tracer| {
+    //             let v: &mut GcPtr<T> = unsafe { std::mem::transmute(self_ptr) };
+    //             tracer.mark(gc, v);
+    //         }}
+    //     }
+    // }
+    // pub fn new_native_traced<T: 'static + Trace<TheGc>>(name: String) -> Self {
+    //     Self {
+    //         size: JavaTypes::Object.size(),
+    //         align: JavaTypes::Object.align().get(),
+    //         ty: FieldDefType::Native { name, ty: std::any::TypeId::of::<T>() , trace: |self_ptr, gc, tracer| {
+    //             let v: &mut GcPtr<T> = unsafe { std::mem::transmute(self_ptr) };
+    //             tracer.visit(gc, v);
+    //             let mut this = v.get_mut(gc).unwrap();
+    //             this.trace(gc, tracer);
+    //         }}
+    //     }
+    // }
 }
 
 /// Helper for constructing structures.
@@ -96,7 +109,6 @@ impl StructureBuilder {
         self.fields.push(f);
     }
 
-
     pub fn build(mut self) -> StructureDef {
         // sorted by size
         self.fields.sort_by(|a, b| b.size.cmp(&a.size));
@@ -104,7 +116,6 @@ impl StructureBuilder {
         let mut output_fields = vec![];
 
         let mut native_map = HashMap::new();
-        let mut java_map = HashMap::new();
 
         // current offset in the structure
         let mut offset = 0;
@@ -112,10 +123,9 @@ impl StructureBuilder {
         // largest alignment among all fields
         let mut largest_alignment = 0;
 
+        let mut nullable_index = 0;
 
         for field in self.fields {
-            
-            
             let align = field.align;
             if align > largest_alignment {
                 largest_alignment = align;
@@ -125,13 +135,14 @@ impl StructureBuilder {
             let padding = (align - (offset % align)) % align;
 
             let idx = output_fields.len();
-            match field.ty {
-                FieldDefType::Java { name, ty } => {
-                    java_map.insert(name, (idx, ty));
-                },
-                FieldDefType::Native { name, ty, trace } => {
-                    native_map.insert(name, (ty, idx, trace));
-                }
+            native_map.insert(field.name, NativeFieldData {
+                field_index: idx,
+                nullable_index: Some(NonMaxU8::new(nullable_index).unwrap()),
+                fns: field.fns
+            });
+            nullable_index += 1;
+            if nullable_index > 64 {
+                panic!("Too many non-nullable fields");
             }
 
             output_fields.push(OffsetSize {
@@ -167,26 +178,67 @@ impl StructureBuilder {
             align: structure_align,
             fields: output_fields,
             native_map,
-            java_map
+            last_nullable_index: nullable_index
         }
     }
+}
+
+#[derive(Clone, Copy)]
+pub struct NativeFieldData {
+    pub nullable_index: Option<NonMaxU8>,
+    pub field_index: usize,
+    pub fns: GcObjectVtable
 }
 
 pub struct StructureDef {
     size: usize,
     align: usize,
     fields: Vec<OffsetSize>,
-    native_map: HashMap<String, (TypeId, usize, FieldTraceFn)>,
-    java_map: HashMap<UnqualifiedName, (usize, ExactJavaType)>,
+    last_nullable_index: u8,
+    native_map: HashMap<String, NativeFieldData>,
 }
 
-impl Trace<TheGc> for StructureDef {
-    fn trace(&mut self, gc: &GarbageCollector<TheGc>, visitor: &mut <TheGc as MemoryManager>::VisitorTy) {
-        for (_, (_, v)) in self.java_map.iter_mut() {
-            visitor.visit_noref(gc, v);
-        }
+unsafe impl GcObject for StructureDef {
+    const MIN_SIZE_ALIGN: (usize, usize) = (size_of::<Self>(), align_of::<Self>());
+
+    const NULLABLE: bool = false;
+
+    const DST: bool = false;
+
+    fn valid_dynamic_size(size: usize) -> bool {
+        false
+    }
+
+    fn trace(
+        &mut self,
+        gc: &GarbageCollector,
+        visitor: &mut VisitorTy,
+    ) {
+        
+    }
+
+    fn finalize(this: NonNullGcPtr<Self>, j: JVM) {
+        
     }
 }
+
+// impl Finalize for StructureDef {
+//     unsafe fn finalize(this: crate::nugc::implementation::NonNullGcPtr<Self>, j: crate::vm::JVM) {
+//         std::ptr::drop_in_place(&mut *this.get_mut(&j.gc()));
+//     }
+// }
+
+// impl Trace<TheGc> for StructureDef {
+//     fn trace(
+//         &mut self,
+//         gc: &GarbageCollector<TheGc>,
+//         visitor: &mut <TheGc as MemoryManager>::VisitorTy,
+//     ) {
+//         for (_, (_, v)) in self.java_map.iter_mut() {
+//             visitor.visit_noref(gc, v);
+//         }
+//     }
+// }
 
 impl StructureDef {
     pub fn size(&self) -> usize {
@@ -200,25 +252,18 @@ impl StructureDef {
     pub fn fields(&self) -> &[OffsetSize] {
         &self.fields
     }
-    pub fn native_fields(&self) -> Vec<(String, (TypeId, OffsetSize, FieldTraceFn))> {
-        let mut vec = vec![];
-        for (k, v) in self.native_map.iter() {
-            vec.push((k.clone(), (v.0, self.fields[v.1], v.2)));
-        }
-        vec
-    }
-    pub fn java_fields(&self) -> Vec<(UnqualifiedName, (OffsetSize, ExactJavaType))> {
-        let mut vec = vec![];
-        for (k, v) in self.java_map.iter() {
-            vec.push((k.clone(), (self.fields[v.0], v.1)));
-        }
-        vec
-    }
+    // pub fn native_fields(&self) -> Vec<(String, (TypeId, OffsetSize, FieldTraceFn))> {
+    //     let mut vec = vec![];
+    //     for (k, v) in self.native_map.iter() {
+    //         vec.push((k.clone(), (v.0, self.fields[v.1], v.2)));
+    //     }
+    //     vec
+    // }
 
 
-    pub fn native_field_offset(&self, f: &str) -> Option<(TypeId, OffsetSize)> {
+    pub fn native_field(&self, f: &str) -> Option<&NativeFieldData> {
         let idx = self.native_map.get(f)?;
-        Some((idx.0, self.fields.get(idx.1).copied()?))
+        Some(idx)
     }
 }
 
