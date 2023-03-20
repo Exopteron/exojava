@@ -136,7 +136,7 @@ macro_rules! def_opcode {
 
                         let mut offsets = vec![];
 
-                        for _ in 0..(high - low + 1) {
+                        for _ in 0..(high.checked_sub(low + 1).ok_or(ClassFileError::ArithmeticError)?) {
                             offsets.push(s.read_u4()? as i32);
                         }
                         Self::tableswitch(default, low, high, offsets)
@@ -151,7 +151,7 @@ macro_rules! def_opcode {
                     }
                     v => return Err(ClassFileError::UnknownOpcodeError(v))
                 };
-                Ok((v, s.1 - start))
+                Ok((v, s.1.checked_sub(start).ok_or(ClassFileError::ArithmeticError)?))
             }
         }
 
@@ -241,7 +241,7 @@ macro_rules! check_constant_pool {
             return Err(CodeVerificationError::BadConstantPoolIndex);
         }
 
-        let entry = $cp.get_constant($v as usize);
+        let entry = $cp.get_constant($v as usize).map_err(CodeVerificationError::ClassFileError)?;
         match entry {
             $p => Ok(()),
             _ => Err(CodeVerificationError::BadConstantPoolType),
@@ -254,7 +254,7 @@ macro_rules! get_name_and_type {
         let (name_index, descriptor_index) = if let ConstantPoolEntry::NameAndType {
             name_index,
             descriptor_index,
-        } = $cp.get_constant($index as usize)
+        } = $cp.get_constant($index as usize).map_err(CodeVerificationError::ClassFileError)?
         {
             (*name_index, *descriptor_index)
         } else {
@@ -280,7 +280,7 @@ macro_rules! parse_str {
 }
 macro_rules! get_class {
     ($index:expr, $cp:expr, $parsety:ty) => {{
-        if let ConstantPoolEntry::Class { name_index } = $cp.get_constant($index as usize) {
+        if let ConstantPoolEntry::Class { name_index } = $cp.get_constant($index as usize).map_err(CodeVerificationError::ClassFileError)? {
             let str = $cp
                 .get_utf8_constant(*name_index as usize)
                 .map_err(CodeVerificationError::ClassFileError)?;
@@ -313,6 +313,9 @@ impl InstructionList {
         max_locals: usize,
         wide_index: Option<u16>,
     ) -> std::result::Result<(), CodeVerificationError> {
+        if max_locals == 0 {
+            return Err(CodeVerificationError::ClassFileError(ClassFileError::ArithmeticError));
+        }
         match inst {
             VMOpcode::goto(v)
             | VMOpcode::ifeq(v)

@@ -56,7 +56,19 @@ pub enum ClassFileError {
     UnknownOpcodeError(u8),
 
     /// Returned when an unknown enum variant is found.
-    UnknownEnumVariant(&'static str, i32)
+    UnknownEnumVariant(&'static str, i32),
+
+    /// Returned when a constant is not present at this index.
+    ConstantNotPresent(usize),
+
+    /// Returned when an invalid constant index is encountered.
+    InvalidConstant(usize),
+
+    /// Returned when a bad constant pool length is found.
+    BadConstantPoolLength,
+
+    /// Returned in the case of a generic arithmetic error.
+    ArithmeticError
 }
 
 pub type Result<T> = std::result::Result<T, ClassFileError>;

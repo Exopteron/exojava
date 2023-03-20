@@ -25,7 +25,11 @@ impl ClassFileItem for ConstantPool {
     where
         Self: Sized,
     {
-        let len = (s.read_u2()? - 1) as usize;
+        let len = s.read_u2()?;
+        if len == 0 {
+            return Err(ClassFileError::BadConstantPoolLength);
+        }
+        let len = (len - 1) as usize;
         Ok(Self {
             entries: s.read_sequence::<ConstantPoolEntry>(cp, len)?,
         })
@@ -36,9 +40,19 @@ pub struct IndexVerificationError {
     pub index: usize,
     pub ty: IndexVerificationErrorType,
 }
+impl IndexVerificationError {
+    pub fn c(e: ClassFileError) -> Self {
+        Self {
+            index: 0,
+            ty: IndexVerificationErrorType::ClassFileError(e)
+        }
+    }
+}
+
 
 #[derive(Debug)]
 pub enum IndexVerificationErrorType {
+    ClassFileError(ClassFileError),
     /// Returned if the `name_index` within a `Class` constant pool entry
     /// is not a `UTF8` entry.
     ClassNameIndexNotUTF8,
@@ -132,13 +146,16 @@ pub enum ConstantPoolVerificationError {
 
 impl ConstantPool {
     /// Get a constant from the pool. Entries are based on 1.
-    pub fn get_constant(&self, index: usize) -> &ConstantPoolEntry {
-        &self.entries[index - 1]
+    pub fn get_constant(&self, index: usize) -> error::Result<&ConstantPoolEntry> {
+        if index == 0 {
+            return Err(ClassFileError::InvalidConstant(index));
+        }
+        self.entries.get(index - 1).ok_or(ClassFileError::ConstantNotPresent(index))
     }
 
     /// Get a UTF-8 constant from the pool.
     pub fn get_utf8_constant(&self, index: usize) -> error::Result<&str> {
-        let c = self.get_constant(index);
+        let c = self.get_constant(index)?;
         if let ConstantPoolEntry::Utf8 { data } = c {
             return Ok(data);
         }
@@ -160,7 +177,7 @@ impl ConstantPool {
                     }
                 },
                 ConstantPoolEntry::Methodref { class_index, name_and_type_index } | ConstantPoolEntry::Fieldref { class_index, name_and_type_index } | ConstantPoolEntry::InterfaceMethodref { class_index, name_and_type_index } => {
-                    let name = match self.get_constant(*class_index as usize) {
+                    let name = match self.get_constant(*class_index as usize).map_err(ConstantPoolVerificationError::ClassFileError)? {
                         ConstantPoolEntry::Class { name_index } => self.get_utf8_constant(*name_index as usize),
                         _ => panic!("we checked types")
                     }.map_err(ConstantPoolVerificationError::ClassFileError)?;
@@ -170,7 +187,7 @@ impl ConstantPool {
                         return Err(ConstantPoolVerificationError::RefInfoMalformedClassName);
                     }
 
-                    let (name_index, descriptor_index) = match self.get_constant(*name_and_type_index as usize) {
+                    let (name_index, descriptor_index) = match self.get_constant(*name_and_type_index as usize).map_err(ConstantPoolVerificationError::ClassFileError)? {
                         ConstantPoolEntry::NameAndType { name_index, descriptor_index } => (name_index, descriptor_index),
                         _ => panic!("Should be impossible, we verified types")                        
                     };
@@ -238,7 +255,7 @@ impl ConstantPool {
                         }
                     }
                     let lexer = Lexer::new();
-                    let (name_index, descriptor_index) = match self.get_constant(*name_and_type_index as usize) {
+                    let (name_index, descriptor_index) = match self.get_constant(*name_and_type_index as usize).map_err(ConstantPoolVerificationError::ClassFileError)? {
                         ConstantPoolEntry::NameAndType { name_index, descriptor_index } => (name_index, descriptor_index),
                         _ => panic!("Should be impossible, we verified types")                        
                     };
@@ -270,7 +287,7 @@ impl ConstantPool {
                 ConstantPoolEntry::Class { name_index } => verify_index!(
                     index,
                     matches!(
-                        self.get_constant(*name_index as usize),
+                        self.get_constant(*name_index as usize).map_err(IndexVerificationError::c)?,
                         ConstantPoolEntry::Utf8 { .. } // name index must be UTF-8
                     ),
                     IndexVerificationErrorType::ClassNameIndexNotUTF8
@@ -279,36 +296,36 @@ impl ConstantPool {
                     class_index,
                     name_and_type_index,
                 } => {
-                    verify_index!(index, matches!(self.get_constant(*class_index as usize), ConstantPoolEntry::Class { .. }), IndexVerificationErrorType::InterfaceMethod_Field_Method_ref_ClassIndexNotClass)?;
-                    verify_index!(index, matches!(self.get_constant(*name_and_type_index as usize), ConstantPoolEntry::NameAndType { .. }), IndexVerificationErrorType::InterfaceMethod_Field_Method_ref_NameAndTypeIndexNotNameAndTypeInfo)?;
+                    verify_index!(index, matches!(self.get_constant(*class_index as usize).map_err(IndexVerificationError::c)?, ConstantPoolEntry::Class { .. }), IndexVerificationErrorType::InterfaceMethod_Field_Method_ref_ClassIndexNotClass)?;
+                    verify_index!(index, matches!(self.get_constant(*name_and_type_index as usize).map_err(IndexVerificationError::c)?, ConstantPoolEntry::NameAndType { .. }), IndexVerificationErrorType::InterfaceMethod_Field_Method_ref_NameAndTypeIndexNotNameAndTypeInfo)?;
                 }
                 ConstantPoolEntry::Methodref {
                     class_index,
                     name_and_type_index,
                 } => {
-                    verify_index!(index, matches!(self.get_constant(*class_index as usize), ConstantPoolEntry::Class { .. }), IndexVerificationErrorType::InterfaceMethod_Field_Method_ref_ClassIndexNotClass)?;
-                    verify_index!(index, matches!(self.get_constant(*name_and_type_index as usize), ConstantPoolEntry::NameAndType { .. }), IndexVerificationErrorType::InterfaceMethod_Field_Method_ref_NameAndTypeIndexNotNameAndTypeInfo)?;
+                    verify_index!(index, matches!(self.get_constant(*class_index as usize).map_err(IndexVerificationError::c)?, ConstantPoolEntry::Class { .. }), IndexVerificationErrorType::InterfaceMethod_Field_Method_ref_ClassIndexNotClass)?;
+                    verify_index!(index, matches!(self.get_constant(*name_and_type_index as usize).map_err(IndexVerificationError::c)?, ConstantPoolEntry::NameAndType { .. }), IndexVerificationErrorType::InterfaceMethod_Field_Method_ref_NameAndTypeIndexNotNameAndTypeInfo)?;
                 },
                 ConstantPoolEntry::InterfaceMethodref {
                     class_index,
                     name_and_type_index,
                 } => {
-                    verify_index!(index, matches!(self.get_constant(*class_index as usize), ConstantPoolEntry::Class { .. }), IndexVerificationErrorType::InterfaceMethod_Field_Method_ref_ClassIndexNotClass)?;
-                    verify_index!(index, matches!(self.get_constant(*name_and_type_index as usize), ConstantPoolEntry::NameAndType { .. }), IndexVerificationErrorType::InterfaceMethod_Field_Method_ref_NameAndTypeIndexNotNameAndTypeInfo)?;
+                    verify_index!(index, matches!(self.get_constant(*class_index as usize).map_err(IndexVerificationError::c)?, ConstantPoolEntry::Class { .. }), IndexVerificationErrorType::InterfaceMethod_Field_Method_ref_ClassIndexNotClass)?;
+                    verify_index!(index, matches!(self.get_constant(*name_and_type_index as usize).map_err(IndexVerificationError::c)?, ConstantPoolEntry::NameAndType { .. }), IndexVerificationErrorType::InterfaceMethod_Field_Method_ref_NameAndTypeIndexNotNameAndTypeInfo)?;
                 },
-                ConstantPoolEntry::String { string_index } => verify_index!(index, matches!(self.get_constant(*string_index as usize), ConstantPoolEntry::Utf8 { .. }), IndexVerificationErrorType::StringIndexNotUTF8)?,
+                ConstantPoolEntry::String { string_index } => verify_index!(index, matches!(self.get_constant(*string_index as usize).map_err(IndexVerificationError::c)?, ConstantPoolEntry::Utf8 { .. }), IndexVerificationErrorType::StringIndexNotUTF8)?,
                 ConstantPoolEntry::NameAndType {
                     name_index,
                     descriptor_index,
                 } => {
-                    verify_index!(index, matches!(self.get_constant(*name_index as usize), ConstantPoolEntry::Utf8 { .. }), IndexVerificationErrorType::NameAndTypeNameIndexNotUTF8)?;
-                    verify_index!(index, matches!(self.get_constant(*descriptor_index as usize), ConstantPoolEntry::Utf8 { .. }), IndexVerificationErrorType::NameAndTypeDescriptorIndexNotUTF8)?;
+                    verify_index!(index, matches!(self.get_constant(*name_index as usize).map_err(IndexVerificationError::c)?, ConstantPoolEntry::Utf8 { .. }), IndexVerificationErrorType::NameAndTypeNameIndexNotUTF8)?;
+                    verify_index!(index, matches!(self.get_constant(*descriptor_index as usize).map_err(IndexVerificationError::c)?, ConstantPoolEntry::Utf8 { .. }), IndexVerificationErrorType::NameAndTypeDescriptorIndexNotUTF8)?;
                 },
                 ConstantPoolEntry::MethodHandle {
                     reference_kind,
                     reference_index,
                 } => {
-                    let entry = &self.get_constant(*reference_index as usize);
+                    let entry = &self.get_constant(*reference_index as usize).map_err(IndexVerificationError::c)?;
                     match reference_kind {
                         RefKind::REF_getField | RefKind::REF_getStatic | RefKind::REF_putField | RefKind::REF_putStatic => {
                             verify_index!(index, matches!(entry, ConstantPoolEntry::Fieldref { .. }), IndexVerificationErrorType::MethodHandleReferenceIndexBadType)?;
@@ -354,11 +371,11 @@ impl ConstantPool {
                         _ => ()
                     }
                 },
-                ConstantPoolEntry::MethodType { descriptor_index } => verify_index!(index, matches!(self.get_constant(*descriptor_index as usize), ConstantPoolEntry::Utf8 { .. }), IndexVerificationErrorType::MethodTypeDescriptorIndexNotUTF8)?,
+                ConstantPoolEntry::MethodType { descriptor_index } => verify_index!(index, matches!(self.get_constant(*descriptor_index as usize).map_err(IndexVerificationError::c)?, ConstantPoolEntry::Utf8 { .. }), IndexVerificationErrorType::MethodTypeDescriptorIndexNotUTF8)?,
                 ConstantPoolEntry::InvokeDynamic {
                     name_and_type_index,
                     ..
-                } => verify_index!(index, matches!(self.get_constant(*name_and_type_index as usize), ConstantPoolEntry::NameAndType { .. }), IndexVerificationErrorType::InvokeDynamicNameAndTypeIndexNotNameAndType)?,
+                } => verify_index!(index, matches!(self.get_constant(*name_and_type_index as usize).map_err(IndexVerificationError::c)?, ConstantPoolEntry::NameAndType { .. }), IndexVerificationErrorType::InvokeDynamicNameAndTypeIndexNotNameAndType)?,
                 _ => ()
             }
         }

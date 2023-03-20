@@ -1,6 +1,6 @@
 
 use quote::{quote};
-use syn::{Block, parse::{Parse, ParseStream}, Pat, Token, punctuated::Punctuated, Type};
+use syn::{Block, parse::{Parse, ParseStream}, Token, punctuated::Punctuated, Type, Pat};
 mod parser_macros;
 
 struct SwitchCase {
@@ -9,14 +9,19 @@ struct SwitchCase {
     block: Block
 }
 
+struct Epic<T: Parse>(T);
+
+
 impl Parse for SwitchCase {
     fn parse(input: syn::parse::ParseStream) -> syn::Result<Self> {
+        
         let ident = input.parse::<Type>()?;
 
         let content;
         syn::parenthesized!(content in input);
 
         let pattern = content.parse::<Pat>()?;
+
 
         let _fat_arrow: Token!(=>) = input.parse()?;
 

@@ -189,7 +189,7 @@ impl SSABuilder {
             VMOpcode::dconst_0() => Some(Constant::Double(0.0)),
             VMOpcode::dconst_1() => Some(Constant::Double(1.0)),
             VMOpcode::ldc(index) => {
-                let constant = self.jvm_pool.get_constant(*index as usize);
+                let constant = self.jvm_pool.get_constant(*index as usize).unwrap();
                 match constant {
                     ConstantPoolEntry::Integer { bytes } => Some(Constant::Int(*bytes)),
                     ConstantPoolEntry::Double { bytes } => Some(Constant::Double(f64::from_bits(*bytes))),
